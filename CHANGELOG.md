@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 ### Visualizer
 - Works with the equalizer off: TIDAL plays with its own player, untouched, and the bars show the original sound in sync with it. With the equalizer on, both still share one download.
