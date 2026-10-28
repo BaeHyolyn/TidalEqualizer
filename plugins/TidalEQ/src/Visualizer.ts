@@ -73,6 +73,21 @@ const albumColor = async (): Promise<string | null> => {
 	return `rgb(${mix(1)},${mix(3)},${mix(5)})`;
 };
 
+/**
+ * The 3D transforms between the cover and its wrapper (e.g. a tilt-on-hover plugin), as one CSS transform,
+ * so the visualizer tilts with the cover instead of staying flat behind it.
+ */
+const tiltOf = (img: HTMLElement, wrapper: HTMLElement) => {
+	const parts: string[] = [];
+	for (let el = img.parentElement; el && el !== wrapper; el = el.parentElement) {
+		const t = getComputedStyle(el).transform;
+		if (t && t !== "none" && t !== "matrix(1, 0, 0, 1, 0, 0)") parts.unshift(t);
+		const p = el.parentElement && getComputedStyle(el.parentElement).perspective;
+		if (p && p !== "none" && parts.length) parts.unshift(`perspective(${p})`);
+	}
+	return parts.join(" ");
+};
+
 export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	const canvas = document.createElement("canvas");
 	// Sits right after the cover inside the now-playing view: above the cover, below the side panel
@@ -134,7 +149,9 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		last = now;
 
 		const img = document.querySelector<HTMLImageElement>(COVER);
-		const rect = img?.getBoundingClientRect();
+		// The cover's flat box: layout size around its on-screen centre, so a 3D tilt or our beat scale doesn't inflate it
+		const box = img?.getBoundingClientRect();
+		const rect = box && new DOMRect(box.left + box.width / 2 - img!.offsetWidth / 2, box.top + box.height / 2 - img!.offsetHeight / 2, img!.offsetWidth, img!.offsetHeight);
 		const visible = !!rect && rect.width > 40 && img!.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) !== false;
 		if (!v.enabled || !settings.enabled || !visible) {
 			if (canvas.width) canvas.width = 0;
@@ -171,7 +188,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		smoothBars(state, target, shown, dt, v);
 		for (let b = 0; b < bands; b++) peaks[b] = Math.max(shown[b], peaks[b] - dt / 1500);
 
-		draw(v, rect!, view.getBoundingClientRect(), bands, now);
+		draw(v, rect!, view.getBoundingClientRect(), bands, now, tiltOf(img!, wrapper));
 
 		// The cover beats with the bass (first ~15% of the bands)
 		if (v.pulse > 0) {
@@ -182,7 +199,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		} else restoreCover();
 	};
 
-	const draw = (v: VizSettings, rect: DOMRect, origin: DOMRect, bands: number, now: number) => {
+	const draw = (v: VizSettings, rect: DOMRect, origin: DOMRect, bands: number, now: number, tilt: string) => {
 		// Room around the cover for the longest bar and its glow; a circle also reaches past the cover's corners
 		const corner = v.shape === "circle" ? (Math.hypot(rect.width, rect.height) - Math.max(rect.width, rect.height)) / 2 : 0;
 		const margin = Math.max(0, v.gap) + v.length + v.glow * 2 + 8 + corner;
@@ -195,7 +212,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			canvas.style.width = `${W}px`;
 			canvas.style.height = `${H}px`;
 		} else ctx.clearRect(0, 0, canvas.width, canvas.height);
-		canvas.style.transform = `translate(${Math.round(rect.left - origin.left - margin)}px,${Math.round(rect.top - origin.top - margin)}px)`;
+		canvas.style.transform = `translate(${Math.round(rect.left - origin.left - margin)}px,${Math.round(rect.top - origin.top - margin)}px) ${tilt}`;
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		// Never draw over an open side panel (Lyrics, Credits, our tabs): TIDAL can put the cover right next to it
 		const panel = document.querySelector("[class*=_panelWrapperActive_]")?.getBoundingClientRect();
@@ -302,6 +319,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		} else {
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
+				if (valueAt(i)[0] < 0.02) continue; // silent bars would only draw a dotted outline
 				const [a, b] = span(1 + valueAt(i)[0] * v.length);
 				ctx.moveTo(x + nx * a, y + ny * a);
 				ctx.lineTo(x + nx * b, y + ny * b);
