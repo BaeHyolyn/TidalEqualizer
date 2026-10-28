@@ -2,6 +2,7 @@ import { Tracer, type LunaUnload } from "@luna/core";
 import { ipcRenderer, MediaItem, PlayState, redux, safeInterval } from "@luna/lib";
 
 import { buildChain } from "./eq";
+import { addNowPlayingTab } from "./NowPlayingTab";
 import { getTime, loadTrack, seek, setChain, setPaused, setVolume, startPlayer, stopPlayer, stopTrack } from "./player.native";
 import { setEqChangeHandler, settings } from "./Settings";
 
@@ -118,4 +119,5 @@ redux.intercept("playbackControls/SET_VOLUME", unloads, () => {
 
 safeInterval(unloads, sync, SYNC_MS);
 unloads.add(stop);
+addNowPlayingTab(unloads);
 start();

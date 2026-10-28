@@ -79,29 +79,33 @@ const MacroSlider = ({ label, value, onChange }: { label: string; value: number;
 	</div>
 );
 
-export const Settings = () => {
-	const [eq, setEq] = React.useState<EqSettings>({
+// Each view keeps its own copy and writes every change through to storage
+export const useEq = () => {
+	const [eq, setEq] = React.useState<EqSettings>(() => ({
 		enabled: settings.enabled,
 		preamp: settings.preamp,
 		bands: settings.bands.map((b) => ({ ...b })),
 		macros: { ...settings.macros },
 		smartVolume: settings.smartVolume,
 		limiter: settings.limiter,
-	});
-	const [mpvPath, setMpvPath] = React.useState(settings.mpvPath);
-	const [selected, setSelected] = React.useState<number | null>(null);
-	const setBand = (i: number, b: Band) => update({ bands: eq.bands.map((x, j) => (j === i ? b : x)) });
-	const setMacro = (key: keyof Macros, v: number) => update({ macros: { ...eq.macros, [key]: v } });
-
+	}));
 	const update = (next: Partial<EqSettings>) => {
 		const merged = { ...eq, ...next };
 		setEq(merged);
 		Object.assign(settings, merged);
 		onEqChange();
 	};
+	return [eq, update] as const;
+};
+
+/** On/off, preset and the band graph; shared by the settings page and the now-playing Equalizer tab. */
+export const EqEditor = ({ eq, update }: { eq: EqSettings; update: (next: Partial<EqSettings>) => void }) => {
+	const [selected, setSelected] = React.useState<number | null>(null);
+	const setBand = (i: number, b: Band) => update({ bands: eq.bands.map((x, j) => (j === i ? b : x)) });
+	const setMacro = (key: keyof Macros, v: number) => update({ macros: { ...eq.macros, [key]: v } });
 
 	return (
-		<LunaSettings>
+		<>
 			<LunaSwitchSetting
 				title="Equalizer"
 				desc="Plays TIDAL through mpv with your equalizer. Turn off to go back to TIDAL's own player."
@@ -150,7 +154,17 @@ export const Settings = () => {
 					</p>
 				)}
 			</div>
+		</>
+	);
+};
 
+export const Settings = () => {
+	const [eq, update] = useEq();
+	const [mpvPath, setMpvPath] = React.useState(settings.mpvPath);
+
+	return (
+		<LunaSettings>
+			<EqEditor eq={eq} update={update} />
 			<LunaSelectSetting
 				title="Preamp"
 				desc="Lowers the level before the bands, so boosts don't clip. Presets set it for you."
