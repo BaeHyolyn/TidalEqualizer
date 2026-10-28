@@ -4,10 +4,13 @@ import React from "react";
 
 import { defaultSettings, PRESETS, type Band, type BandType, type EqSettings, type Macros, type SmartVolume } from "./eq";
 import { EqGraph } from "./EqGraph";
+import { defaultViz, type VizSettings } from "./viz";
 
 export const DEFAULT_MPV = "C:\\Program Files\\MPV Player\\mpv.exe";
 
-export const settings = await ReactiveStore.getPluginStorage("TidalEQ", { ...defaultSettings(), mpvPath: DEFAULT_MPV });
+export const settings = await ReactiveStore.getPluginStorage("TidalEQ", { ...defaultSettings(), mpvPath: DEFAULT_MPV, viz: defaultViz() });
+// Stored visualizer settings over the defaults, so options added in later versions get their default
+export const vizSettings = (): VizSettings => ({ ...defaultViz(), ...settings.viz });
 
 // Called by index.ts whenever the equalizer changes, so mpv picks it up immediately
 let onEqChange: () => void = () => {};

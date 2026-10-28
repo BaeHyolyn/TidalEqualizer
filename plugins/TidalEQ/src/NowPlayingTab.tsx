@@ -8,10 +8,10 @@ import { EqGraph } from "./EqGraph";
 import { BandEditor, MacroSlider, useEq } from "./Settings";
 
 // TIDAL's class names are hashed per build, so only data-test attributes and class names copied at runtime are used.
-// The Equalizer tab borrows the Credits panel: TIDAL opens it (and shifts the artwork aside), we cover its content with ours.
+// Our tabs borrow the Credits panel: TIDAL opens it (and shifts the artwork aside), we cover its content with ours.
 
-const text: React.CSSProperties = { fontSize: 14, fontWeight: 400, color: "rgba(255,255,255,0.55)", margin: 0 };
-const heading: React.CSSProperties = { fontSize: 14, fontWeight: 500, color: "#fff", margin: "0 0 12px" };
+export const text: React.CSSProperties = { fontSize: 14, fontWeight: 400, color: "rgba(255,255,255,0.55)", margin: 0 };
+export const heading: React.CSSProperties = { fontSize: 14, fontWeight: 500, color: "#fff", margin: "0 0 12px" };
 
 // The preset whose bands and preamp match the current ones, if any
 const currentPreset = (eq: EqSettings) =>
@@ -22,15 +22,15 @@ const currentPreset = (eq: EqSettings) =>
 	});
 
 /** Same look as TIDAL's own tabs: their class names are passed in from the live buttons. */
-const Pill = ({ looks, pressed, onClick, children }: { looks: Looks; pressed: boolean; onClick: () => void; children: React.ReactNode }) => (
+export const Pill = ({ looks, pressed, onClick, children }: { looks: Looks; pressed: boolean; onClick: () => void; children: React.ReactNode }) => (
 	<button type="button" aria-pressed={pressed} onClick={onClick} className={pressed ? `${looks.button} ${looks.pressed}` : looks.button}>
 		<span className={looks.label}>{children}</span>
 	</button>
 );
 
-type Looks = { button: string; pressed: string; label: string };
+export type Looks = { button: string; pressed: string; label: string };
 
-const Panel = ({ looks }: { looks: Looks }) => {
+export const EqPanel = ({ looks }: { looks: Looks }) => {
 	const [eq, update] = useEq();
 	const [selected, setSelected] = React.useState<number | null>(null);
 	const preset = currentPreset(eq);
@@ -82,21 +82,48 @@ const Panel = ({ looks }: { looks: Looks }) => {
 	);
 };
 
-export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
+type Tab = { button: HTMLButtonElement; close: () => void; isActive: () => boolean; reattach: (panel: HTMLElement) => void };
+const tabs: Tab[] = [];
+// TIDAL's "pressed" classes, learned from the Credits button the first time it's pressed
+let pressedClasses: string[] = [];
+
+// Learn TIDAL's "pressed" classes: from a pressed TIDAL tab compared to an unpressed one, or failing that from its stylesheets
+const learnPressed = () => {
+	const pressed = document.querySelector("[data-test^=toggle-][aria-pressed=true]:not([data-test^=toggle-tidaleq])");
+	const plain = document.querySelector("[data-test^=toggle-][aria-pressed=false]:not([data-test^=toggle-tidaleq])");
+	const extra = pressed && plain ? [...pressed.classList].filter((c) => !plain.classList.contains(c)) : [];
+	if (extra.length) return void (pressedClasses = extra);
+	if (pressedClasses.length) return;
+	for (const sheet of document.styleSheets) {
+		try {
+			const match = [...sheet.cssRules].map((r) => r.cssText.match(/\.(_toggleButtonActive_\w+)/)).find(Boolean);
+			if (match) return void (pressedClasses = [match[1]]);
+		} catch {
+			// cross-origin stylesheet
+		}
+	}
+};
+
+const credits = () => document.querySelector<HTMLButtonElement>("[data-test=toggle-credits]");
+const creditsPanel = () => document.querySelector<HTMLElement>("[data-test=now-playing-credits]");
+const setPressed = (el: Element, pressed: boolean) => {
+	if (pressed) el.classList.add(...pressedClasses);
+	else el.classList.remove(...pressedClasses);
+	el.setAttribute("aria-pressed", String(pressed));
+};
+
+/** Adds a tab next to Lyrics that shows `Panel` where TIDAL's Credits would be. Tabs appear in the order they're added. */
+export const addPanelTab = (unloads: Set<LunaUnload>, id: string, label: string, Panel: React.FC<{ looks: Looks }>) => {
 	let active = false;
 	let root: Root | null = null;
 	let host: HTMLElement | null = null;
 	let hiddenPanel: HTMLElement | null = null;
-	let pressedClasses: string[] = [];
 
 	const button = document.createElement("button");
 	button.type = "button";
-	button.dataset.test = "toggle-tidaleq";
+	button.dataset.test = `toggle-${id}`;
 	button.setAttribute("aria-pressed", "false");
-	button.innerHTML = `<span>Equalizer</span>`;
-	unloads.add(() => button.remove());
-
-	const credits = () => document.querySelector<HTMLButtonElement>("[data-test=toggle-credits]");
+	button.innerHTML = `<span>${label}</span>`;
 
 	const close = () => {
 		if (!active) return;
@@ -106,49 +133,39 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 		root = host = null;
 		if (hiddenPanel) hiddenPanel.style.display = "";
 		hiddenPanel = null;
-		button.classList.remove(...pressedClasses);
-		button.setAttribute("aria-pressed", "false");
+		setPressed(button, false);
 	};
-	unloads.add(close);
+
+	// Our panel lives in the Credits panel's own scroll container (so it gets TIDAL's padding and scrolling at every size)
+	const reattach = (panel: HTMLElement) => {
+		if (!active || !host) return;
+		if (hiddenPanel && hiddenPanel !== panel) hiddenPanel.style.display = "";
+		hiddenPanel = panel;
+		panel.style.display = "none";
+		if (host.parentElement !== panel.parentElement) panel.after(host);
+	};
 
 	const open = async () => {
 		const creditsButton = credits();
 		if (!creditsButton) return;
-		if (creditsButton.getAttribute("aria-pressed") !== "true") creditsButton.click();
-		// Wait for TIDAL to render the Credits panel
+		// Credits may already be open underneath another of our tabs; only ask TIDAL to open it when it isn't
+		if (!creditsPanel()) creditsButton.click();
 		let panel: HTMLElement | null = null;
-		for (let i = 0; i < 40 && !panel; i++) {
-			await new Promise((r) => setTimeout(r, 25));
-			panel = document.querySelector<HTMLElement>("[data-test=now-playing-credits]");
-		}
+		for (let i = 0; i < 40 && !(panel = creditsPanel()); i++) await new Promise((r) => setTimeout(r, 25));
 		if (!panel) return;
 
-		// Move the "pressed" look from Credits to our button
-		pressedClasses = [...creditsButton.classList].filter((c) => !button.classList.contains(c));
-		creditsButton.classList.remove(...pressedClasses);
-		creditsButton.setAttribute("aria-pressed", "false");
-		button.classList.add(...pressedClasses);
-		button.setAttribute("aria-pressed", "true");
+		learnPressed();
+		setPressed(creditsButton, false);
+		setPressed(button, true);
 
+		active = true;
 		host = document.createElement("div");
 		host.style.height = "100%";
-		attach(panel);
+		reattach(panel);
 		root = createRoot(host);
-		root.render(<Panel looks={{ button: button.className.split(" ").filter((c) => !pressedClasses.includes(c)).join(" "), pressed: pressedClasses.join(" "), label: button.firstElementChild!.className }} />);
-		active = true;
+		const plain = button.className.split(" ").filter((c) => !pressedClasses.includes(c)).join(" ");
+		root.render(<Panel looks={{ button: plain, pressed: pressedClasses.join(" "), label: button.firstElementChild!.className }} />);
 	};
-
-	// Our panel lives in the Credits panel's own scroll container (so it gets TIDAL's padding and scrolling at every size)
-	const attach = (panel: HTMLElement) => {
-		if (hiddenPanel && hiddenPanel !== panel) hiddenPanel.style.display = "";
-		hiddenPanel = panel;
-		panel.style.display = "none";
-		if (host && host.parentElement !== panel.parentElement) panel.after(host);
-	};
-	// TIDAL rebuilds the panel on some layout changes (like resizing): take it over again
-	observe<HTMLElement>(unloads, "[data-test=now-playing-credits]", (panel) => {
-		if (active && host) attach(panel);
-	});
 
 	button.addEventListener("click", () => {
 		if (!active) return void open();
@@ -156,42 +173,55 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 		credits()?.click(); // closes the borrowed panel
 	});
 
-	// Another tab clicked while ours is open: Lyrics/Similar replace the panel; Credits is already there underneath
+	// Another tab clicked while ours is open: Lyrics/Similar and our other tabs take over the panel; Credits is already there underneath
 	const onTabClick = (e: MouseEvent) => {
 		if (!active) return;
 		const tab = (e.target as Element).closest?.("[data-test^=toggle-]");
 		if (!tab || tab === button) return;
+		close();
 		if (tab.getAttribute("data-test") === "toggle-credits") {
 			e.stopPropagation();
 			e.preventDefault();
-			const c = tab as HTMLElement;
-			close();
-			c.classList.add(...pressedClasses);
-			c.setAttribute("aria-pressed", "true");
-			return;
+			setPressed(tab, true);
 		}
-		close();
 	};
 	document.addEventListener("click", onTabClick, true);
-	unloads.add(() => document.removeEventListener("click", onTabClick, true));
 
-	// Insert next to Lyrics whenever the now-playing view renders the tab bar
-	const insert = (lyrics: Element) => {
-		if (button.isConnected && button.parentElement === lyrics.parentElement) return;
-		// Copy the look of a tab that isn't pressed; a re-rendered tab bar (e.g. on resize) keeps our tab open
-		const plain = [...lyrics.parentElement!.querySelectorAll("[data-test^=toggle-][aria-pressed=false]")].find((t) => t !== button) ?? lyrics;
-		button.className = plain.className;
-		if (active) button.classList.add(...pressedClasses);
-		if (active) {
+	tabs.push({ button, close, isActive: () => active, reattach });
+	unloads.add(() => {
+		close();
+		button.remove();
+		document.removeEventListener("click", onTabClick, true);
+		tabs.splice(tabs.findIndex((t) => t.button === button), 1);
+	});
+	if (tabs.length === 1) watchNowPlaying(unloads);
+	else insertTabs();
+};
+
+// Insert our buttons after Lyrics whenever the now-playing view renders the tab bar
+const insertTabs = () => {
+	const lyrics = document.querySelector("[data-test=toggle-lyrics]");
+	if (!lyrics?.parentElement) return;
+	const placed = tabs.every((t, i) => t.button.previousElementSibling === (i ? tabs[i - 1].button : lyrics));
+	if (placed) return;
+	// Copy the look of a tab that isn't pressed; a re-rendered tab bar (e.g. on resize) keeps our tab open
+	const plain = [...lyrics.parentElement.querySelectorAll("[data-test^=toggle-][aria-pressed=false]")].find((t) => !tabs.some((x) => x.button === t)) ?? lyrics;
+	for (const t of tabs) {
+		t.button.className = plain.className;
+		t.button.firstElementChild!.className = plain.firstElementChild?.className ?? "";
+		if (t.isActive()) {
+			setPressed(t.button, true);
 			const c = credits();
-			c?.classList.remove(...pressedClasses);
-			c?.setAttribute("aria-pressed", "false");
+			if (c) setPressed(c, false);
 		}
-		button.firstElementChild!.className = plain.firstElementChild?.className ?? "";
-		lyrics.after(button);
-	};
-	observe(unloads, "[data-test=toggle-lyrics]", insert);
+	}
+	lyrics.after(...tabs.map((t) => t.button));
+};
+
+const watchNowPlaying = (unloads: Set<LunaUnload>) => {
+	observe(unloads, "[data-test=toggle-lyrics]", insertTabs);
+	// TIDAL rebuilds the panel on some layout changes (like resizing): take it over again
+	observe<HTMLElement>(unloads, "[data-test=now-playing-credits]", (panel) => tabs.forEach((t) => t.reattach(panel)));
 	// observe only sees changes, so handle a now-playing view that is already open
-	const existing = document.querySelector("[data-test=toggle-lyrics]");
-	if (existing) insert(existing);
+	insertTabs();
 };

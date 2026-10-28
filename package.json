@@ -18,7 +18,7 @@
 		"build": "rimraf ./dist && tsx esbuild.config.ts",
 		"esWatch": "rimraf ./dist && tsx ./esbuild.config.ts --watch",
 		"serve": "http-server ./dist -p 3000 -s --cors -c-1",
-		"test": "tsx plugins/TidalEQ/src/eq.test.ts"
+		"test": "tsx plugins/TidalEQ/src/eq.test.ts && tsx plugins/TidalEQ/src/viz.test.ts"
 	},
 	"devDependencies": {
 		"@inrixia/helpers": "^3.21.2",

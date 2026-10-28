@@ -1,0 +1,330 @@
+import type { LunaUnload } from "@luna/core";
+import { MediaItem, PlayState } from "@luna/lib";
+
+import { responseDb } from "./eq";
+import { getTime, readPcm } from "./player.native";
+import { settings, vizSettings } from "./Settings";
+import { analyze, bandEdges, bandLevels, PCM_RATE, smoothBars, type VizSettings } from "./viz";
+
+// Draws the spectrum around TIDAL's now-playing cover on one canvas, in its own animation loop (never through React).
+// Samples come from the silent decoder mpv (readPcm); the position from the playing mpv, extrapolated between polls.
+
+const VIEW = "[data-test=new-now-playing]";
+const COVER = `${VIEW} [class*=_artworkWrapper_] img`;
+
+// Decoded samples of the current track
+let pcm = new Float32Array(PCM_RATE * 60 * 5);
+let pcmLength = 0;
+let pcmBytes = 0;
+let pcmDone = true;
+let pcmLeftover = new Uint8Array(0);
+
+/** Called on every track load: forget the old samples and read the new ones as they're decoded. */
+export const resetPcm = (decoding: boolean) => {
+	pcmLength = 0;
+	pcmBytes = 0;
+	pcmLeftover = new Uint8Array(0);
+	pcmDone = !decoding;
+};
+
+const pullPcm = async () => {
+	if (pcmDone) return;
+	const { data, done } = await readPcm(pcmBytes);
+	if (data?.length) {
+		pcmBytes += data.length;
+		// Samples are 4 bytes; a read can end mid-sample, so carry the remainder to the next read
+		const bytes = new Uint8Array(pcmLeftover.length + data.length);
+		bytes.set(pcmLeftover);
+		bytes.set(data, pcmLeftover.length);
+		const whole = bytes.length - (bytes.length % 4);
+		pcmLeftover = bytes.slice(whole);
+		const samples = new Float32Array(bytes.buffer, 0, whole / 4);
+		if (pcmLength + samples.length > pcm.length) {
+			const bigger = new Float32Array(Math.max(pcm.length * 2, pcmLength + samples.length));
+			bigger.set(pcm.subarray(0, pcmLength));
+			pcm = bigger;
+		}
+		pcm.set(samples, pcmLength);
+		pcmLength += samples.length;
+	}
+	if (done && !data?.length) pcmDone = true;
+};
+
+// Playing position: polled from mpv a few times a second, extrapolated in between
+let polled = { time: 0, at: 0 };
+const pollTime = async () => {
+	const time = await getTime();
+	if (time !== null) polled = { time, at: performance.now() };
+};
+const position = (offsetMs: number) => {
+	const t = PlayState.playing ? polled.time + (performance.now() - polled.at) / 1000 : polled.time;
+	return t - offsetMs / 1000;
+};
+
+/**
+ * TIDAL's own accent colour for the album, lightened: TIDAL tints the now-playing background with the same colour,
+ * so the raw one would vanish into it.
+ */
+const albumColor = async (): Promise<string | null> => {
+	const album = await (await MediaItem.fromPlaybackContext())?.album();
+	const hex = album?.tidalAlbum?.vibrantColor;
+	if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
+	const mix = (i: number) => Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.55 + 255 * 0.45);
+	return `rgb(${mix(1)},${mix(3)},${mix(5)})`;
+};
+
+export const startVisualizer = (unloads: Set<LunaUnload>) => {
+	const canvas = document.createElement("canvas");
+	// Sits right after the cover inside the now-playing view: above the cover, below the side panel
+	// (a body-level canvas ends up behind TIDAL's layers)
+	canvas.style.cssText = "position:absolute;pointer-events:none;left:0;top:0;";
+	const ctx = canvas.getContext("2d")!;
+	unloads.add(() => canvas.remove());
+
+	let cover: HTMLImageElement | null = null;
+	let coverSrc = "";
+	let artColor: string | null = null;
+	const restoreCover = () => cover && (cover.style.scale = "");
+	unloads.add(restoreCover);
+
+	// Per-bar buffers, rebuilt when the bar count or frequency range changes
+	let key = "";
+	let edges = new Float32Array(0);
+	let eqDb = new Float32Array(0);
+	let levels = new Float32Array(0);
+	let target = new Float32Array(0);
+	let state = new Float32Array(0);
+	let shown = new Float32Array(0);
+	let peaks = new Float32Array(0);
+	let eqKey = "";
+
+	const rebuild = (v: VizSettings, bands: number) => {
+		const k = `${bands}|${v.minFreq}|${v.maxFreq}`;
+		if (k === key) return;
+		key = k;
+		edges = bandEdges(bands, v.minFreq, v.maxFreq);
+		[eqDb, levels, target, state, shown, peaks] = [0, 0, 0, 0, 0, 0].map(() => new Float32Array(bands));
+		eqKey = "";
+	};
+
+	// What the equalizer adds at each band's centre, so the bars show what you hear (recomputed only when it changes)
+	const refreshEq = () => {
+		const k = settings.enabled ? JSON.stringify([settings.bands, settings.macros, settings.preamp, key]) : key;
+		if (k === eqKey) return;
+		eqKey = k;
+		for (let b = 0; b < eqDb.length; b++) {
+			const fc = Math.sqrt(edges[b] * edges[b + 1]);
+			eqDb[b] = settings.enabled ? responseDb(settings, fc) + settings.preamp : 0;
+		}
+	};
+
+	let last = performance.now();
+	let lastPoll = 0;
+	let lastPull = 0;
+	let frame = 0;
+	let running = true;
+	unloads.add(() => (running = false));
+
+	const loop = (now: number) => {
+		if (!running) return;
+		frame = requestAnimationFrame(loop);
+		const v = vizSettings();
+		if (v.fps > 0 && now - last < 1000 / v.fps - 2) return;
+		const dt = Math.min(100, now - last);
+		last = now;
+
+		const img = document.querySelector<HTMLImageElement>(COVER);
+		const rect = img?.getBoundingClientRect();
+		const visible = !!rect && rect.width > 40 && img!.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) !== false;
+		if (!v.enabled || !settings.enabled || !visible) {
+			if (canvas.width) canvas.width = 0;
+			restoreCover();
+			return;
+		}
+		if (img !== cover) restoreCover(), (cover = img!);
+		const wrapper = img!.closest<HTMLElement>("[class*=_artworkWrapper_]")!;
+		const view = wrapper.parentElement!;
+		if (canvas.previousElementSibling !== wrapper) {
+			if (getComputedStyle(view).position === "static") view.style.position = "relative";
+			wrapper.after(canvas);
+		}
+		if (img!.src !== coverSrc) {
+			coverSrc = img!.src;
+			albumColor().then((c) => (artColor = c)).catch(() => (artColor = null));
+		}
+
+		if (now - lastPoll > 100) (lastPoll = now), void pollTime();
+		if (now - lastPull > 200) (lastPull = now), void pullPcm();
+
+		const bands = Math.max(4, Math.round(v.mirror ? v.bars / 2 : v.bars));
+		rebuild(v, bands);
+		refreshEq();
+
+		// Spectrum at the playing position → 0..1 per band
+		const spec = analyze(pcm, pcmLength, position(v.syncOffset) * PCM_RATE);
+		bandLevels(spec, edges, levels);
+		for (let b = 0; b < bands; b++) {
+			const fc = Math.sqrt(edges[b] * edges[b + 1]);
+			const db = levels[b] + eqDb[b] + v.tilt * Math.log2(fc / 1000);
+			target[b] = PlayState.playing ? Math.min(1, Math.max(0, (db + v.sensitivity + v.range) / v.range)) : 0;
+		}
+		smoothBars(state, target, shown, dt, v);
+		for (let b = 0; b < bands; b++) peaks[b] = Math.max(shown[b], peaks[b] - dt / 1500);
+
+		draw(v, rect!, view.getBoundingClientRect(), bands, now);
+
+		// The cover beats with the bass (first ~15% of the bands)
+		if (v.pulse > 0) {
+			let bass = 0;
+			const n = Math.max(1, Math.round(bands * 0.15));
+			for (let b = 0; b < n; b++) bass += shown[b];
+			img!.style.scale = String(1 + (bass / n) * v.pulse * 0.06);
+		} else restoreCover();
+	};
+
+	const draw = (v: VizSettings, rect: DOMRect, origin: DOMRect, bands: number, now: number) => {
+		// Room around the cover for the longest bar and its glow; a circle also reaches past the cover's corners
+		const corner = v.shape === "circle" ? (Math.hypot(rect.width, rect.height) - Math.max(rect.width, rect.height)) / 2 : 0;
+		const margin = Math.max(0, v.gap) + v.length + v.glow * 2 + 8 + corner;
+		const dpr = window.devicePixelRatio || 1;
+		const W = Math.ceil(rect.width + margin * 2);
+		const H = Math.ceil(rect.height + margin * 2);
+		if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+			canvas.width = Math.round(W * dpr);
+			canvas.height = Math.round(H * dpr);
+			canvas.style.width = `${W}px`;
+			canvas.style.height = `${H}px`;
+		} else ctx.clearRect(0, 0, canvas.width, canvas.height);
+		canvas.style.transform = `translate(${Math.round(rect.left - origin.left - margin)}px,${Math.round(rect.top - origin.top - margin)}px)`;
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		// Never draw over an open side panel (Lyrics, Credits, our tabs): TIDAL can put the cover right next to it
+		const panel = document.querySelector("[class*=_panelWrapperActive_]")?.getBoundingClientRect();
+		ctx.save();
+		if (panel && panel.left > rect.right - 1) {
+			ctx.beginPath();
+			ctx.rect(0, 0, panel.left - 12 - (rect.left - margin), H);
+			ctx.clip();
+		}
+
+		// The cover in canvas coordinates, grown by the gap
+		const cx = W / 2;
+		const cy = H / 2;
+		const hw = rect.width / 2 + v.gap;
+		const hh = rect.height / 2 + v.gap;
+		const radius = Math.hypot(rect.width, rect.height) / 2 + v.gap;
+		const n = v.mirror ? bands * 2 : bands;
+		const perimeter = v.shape === "circle" ? 2 * Math.PI * radius : 4 * (hw + hh);
+		const slot = perimeter / n;
+		const turn = v.rotation / 360 + (v.spin * now) / 60000;
+
+		// Point on the outline and its outward direction, for a fraction 0..1 starting at the bottom centre, clockwise on screen
+		const at = (f: number): [number, number, number, number] => {
+			f = ((f % 1) + 1) % 1;
+			if (v.shape === "circle") {
+				const a = Math.PI / 2 + f * 2 * Math.PI;
+				return [cx + Math.cos(a) * radius, cy + Math.sin(a) * radius, Math.cos(a), Math.sin(a)];
+			}
+			let s = f * perimeter;
+			const legs: [number, number, number, number, number, number, number][] = [
+				// length, start x, start y, step x, step y, normal x, normal y
+				[hw, cx, cy + hh, -1, 0, 0, 1],
+				[2 * hh, cx - hw, cy + hh, 0, -1, -1, 0],
+				[2 * hw, cx - hw, cy - hh, 1, 0, 0, -1],
+				[2 * hh, cx + hw, cy - hh, 0, 1, 1, 0],
+				[hw, cx + hw, cy + hh, -1, 0, 0, 1],
+			];
+			for (const [len, x, y, dx, dy, nx, ny] of legs) {
+				if (s <= len) return [x + dx * s, y + dy * s, nx, ny];
+				s -= len;
+			}
+			return [cx, cy + hh, 0, 1];
+		};
+		const valueAt = (i: number) => {
+			const b = v.mirror ? (i < bands ? i : n - 1 - i) : i;
+			return [shown[b], peaks[b]];
+		};
+		// Where a bar of `len` px starts and ends, depending on placement
+		const span = (len: number): [number, number] =>
+			v.placement === "outside" ? [0, len] : v.placement === "inside" ? [0, -len] : [-len / 2, len / 2];
+
+		// Colours: one paint for the whole frame keeps it to a single draw call
+		const art = artColor ?? v.color1;
+		let paint: string | CanvasGradient = v.colorMode === "artwork" ? art : v.color1;
+		if (v.colorMode === "gradient" || v.colorMode === "spectrum" || v.colorMode === "artwork") {
+			const g = ctx.createConicGradient(Math.PI / 2 + turn * 2 * Math.PI, cx, cy);
+			const stops =
+				v.colorMode === "spectrum"
+					? [0, 60, 120, 180, 240, 300, 360].map((h) => `hsl(${h},90%,60%)`)
+					: v.colorMode === "artwork"
+						? [art, v.color1, art]
+						: [v.color1, v.color2, v.color1];
+			stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+			paint = g;
+		}
+		ctx.globalAlpha = v.opacity;
+		ctx.shadowBlur = v.glow;
+		ctx.shadowColor = v.colorMode === "solid" ? v.color1 : art;
+		ctx.strokeStyle = ctx.fillStyle = paint;
+		ctx.lineCap = v.roundCaps ? "round" : "butt";
+		ctx.lineJoin = "round";
+
+		ctx.beginPath();
+		if (v.style === "wave") {
+			const pts: [number, number][] = [];
+			for (let i = 0; i < n; i++) {
+				const [x, y, nx, ny] = at(i / n + turn);
+				const [, end] = span(2 + valueAt(i)[0] * v.length);
+				pts.push([x + nx * end, y + ny * end]);
+			}
+			// Smooth closed curve through the tips, via midpoints
+			const mid = (a: [number, number], b: [number, number]) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as const;
+			const start = mid(pts[n - 1], pts[0]);
+			ctx.moveTo(start[0], start[1]);
+			for (let i = 0; i < n; i++) {
+				const m = mid(pts[i], pts[(i + 1) % n]);
+				ctx.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]);
+			}
+			ctx.closePath();
+			ctx.lineWidth = Math.max(1, slot * v.width * 0.5);
+			ctx.globalAlpha = v.opacity * 0.35;
+			ctx.fill();
+			ctx.globalAlpha = v.opacity;
+			ctx.stroke();
+		} else if (v.style === "dots") {
+			for (let i = 0; i < n; i++) {
+				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
+				const [, end] = span(2 + valueAt(i)[0] * v.length);
+				const r = Math.max(1, (slot * v.width) / 2);
+				ctx.moveTo(x + nx * end + r, y + ny * end);
+				ctx.arc(x + nx * end, y + ny * end, r, 0, 2 * Math.PI);
+			}
+			ctx.fill();
+		} else {
+			for (let i = 0; i < n; i++) {
+				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
+				const [a, b] = span(1 + valueAt(i)[0] * v.length);
+				ctx.moveTo(x + nx * a, y + ny * a);
+				ctx.lineTo(x + nx * b, y + ny * b);
+			}
+			ctx.lineWidth = Math.max(1, slot * v.width);
+			ctx.stroke();
+		}
+
+		if (v.peaks && v.style !== "wave") {
+			ctx.beginPath();
+			ctx.shadowBlur = 0;
+			for (let i = 0; i < n; i++) {
+				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
+				const [, end] = span(3 + valueAt(i)[1] * v.length);
+				ctx.moveTo(x + nx * end, y + ny * end);
+				ctx.lineTo(x + nx * (end + 2 * Math.sign(end || 1)), y + ny * (end + 2 * Math.sign(end || 1)));
+			}
+			ctx.lineWidth = Math.max(1, slot * v.width);
+			ctx.stroke();
+		}
+		ctx.restore();
+	};
+
+	frame = requestAnimationFrame(loop);
+	unloads.add(() => cancelAnimationFrame(frame));
+};

@@ -2,9 +2,12 @@ import { Tracer, type LunaUnload } from "@luna/core";
 import { ipcRenderer, MediaItem, PlayState, redux, safeInterval } from "@luna/lib";
 
 import { buildChain } from "./eq";
-import { addNowPlayingTab } from "./NowPlayingTab";
-import { getTime, loadTrack, seek, setChain, setPaused, setVolume, startPlayer, stopPlayer, stopTrack } from "./player.native";
-import { setEqChangeHandler, settings } from "./Settings";
+import { addPanelTab, EqPanel } from "./NowPlayingTab";
+import { getTime, loadTrack, seek, setChain, setPaused, setVolume, startAnalysis, startPlayer, stopAnalysis, stopPlayer, stopTrack } from "./player.native";
+import { setEqChangeHandler, settings, vizSettings } from "./Settings";
+import { resetPcm, startVisualizer } from "./Visualizer";
+import { VizPanel } from "./VizPanel";
+import { PCM_RATE } from "./viz";
 
 export const unloads = new Set<LunaUnload>();
 export const { trace } = Tracer("[TidalEQ]");
@@ -24,6 +27,7 @@ let lastVolume = -1;
 let busy = false;
 let holdUntil = 0;
 let backSeekSince = 0;
+let analyzedId: MediaItem["id"] | null = null; // track the visualizer has samples for
 
 const tidalVolume = () => redux.store.getState().playbackControls.volume ?? 100;
 // TIDAL reports its position only every ~300 ms; fill the gaps with elapsed time so mpv isn't judged against a stale value
@@ -49,7 +53,7 @@ const sync = async () => {
 		if (!media || media.contentType !== "track") {
 			// mpv only does audio: let TIDAL play videos itself
 			if (loadedId !== null) await stopTrack();
-			loadedId = null;
+			loadedId = analyzedId = null;
 			setOriginalVolume(tidalVolume());
 			return;
 		}
@@ -65,6 +69,18 @@ const sync = async () => {
 			backSeekSince = 0;
 			lastPaused = !PlayState.playing;
 			return;
+		}
+
+		// The visualizer decodes the track separately; (re)start it when turned on or after a track change
+		const wantAnalysis = vizSettings().enabled;
+		if (wantAnalysis && analyzedId !== loadedId) {
+			await startAnalysis(PCM_RATE);
+			resetPcm(true);
+			analyzedId = loadedId;
+		} else if (!wantAnalysis && analyzedId !== null) {
+			await stopAnalysis();
+			resetPcm(false);
+			analyzedId = null;
 		}
 
 		const paused = !PlayState.playing;
@@ -114,7 +130,7 @@ const start = async () => {
 		return;
 	}
 	running = true;
-	loadedId = null;
+	loadedId = analyzedId = null;
 	lastPaused = null;
 	lastVolume = -1;
 	await sync();
@@ -122,7 +138,7 @@ const start = async () => {
 
 const stop = async () => {
 	running = false;
-	loadedId = null;
+	loadedId = analyzedId = null;
 	await stopPlayer().catch(() => {});
 	setOriginalVolume(tidalVolume());
 };
@@ -147,5 +163,7 @@ redux.intercept("playbackControls/SET_VOLUME", unloads, () => {
 
 safeInterval(unloads, sync, SYNC_MS);
 unloads.add(stop);
-addNowPlayingTab(unloads);
+addPanelTab(unloads, "tidaleq", "Equalizer", EqPanel);
+addPanelTab(unloads, "tidaleq-visualizer", "Visualizer", VizPanel);
+startVisualizer(unloads);
 start();
