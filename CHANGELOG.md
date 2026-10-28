@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Visualizer not showing on albums with an animated cover, which TIDAL plays as a video (#11).
+
 ## 1.2.0
 
 ### Visualizer

@@ -10,7 +10,10 @@ import { analyze, autoPoints, bandEdges, bandLevels, coverPixels, PCM_RATE, samp
 // Samples come from the silent decoder mpv (readPcm); the position from the playing mpv, extrapolated between polls.
 
 const VIEW = "[data-test=new-now-playing]";
-const COVER = `${VIEW} [class*=_artworkWrapper_] img`;
+// The cover is an <img>, or a <video> for albums with an animated cover
+export const COVER = `${VIEW} [class*=_artworkWrapper_] :is(img, video)`;
+/** The cover's still image: an animated cover's poster frame is the same artwork. */
+export const coverImageSrc = (el: Element | null) => (el instanceof HTMLVideoElement ? el.poster : el instanceof HTMLImageElement ? el.src : "");
 
 // Decoded samples of the current track
 let pcm = new Float32Array(PCM_RATE * 60 * 5);
@@ -169,7 +172,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const dt = Math.min(100, now - last);
 		last = now;
 
-		const img = document.querySelector<HTMLImageElement>(COVER);
+		const img = document.querySelector<HTMLElement>(COVER);
 		// The cover's flat box: layout size around its on-screen centre, so a 3D tilt or our beat scale doesn't inflate it
 		const box = img?.getBoundingClientRect();
 		const rect = box && new DOMRect(box.left + box.width / 2 - img!.offsetWidth / 2, box.top + box.height / 2 - img!.offsetHeight / 2, img!.offsetWidth, img!.offsetHeight);
@@ -187,8 +190,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			if (getComputedStyle(view).position === "static") view.style.position = "relative";
 			wrapper.after(canvas);
 		}
-		if (img!.src !== coverSrc) {
-			coverSrc = img!.src;
+		if (coverImageSrc(img) !== coverSrc) {
+			coverSrc = coverImageSrc(img);
 			albumColor().then((c) => (artColor = c)).catch(() => (artColor = null));
 			pixels = null;
 			pointsKey = "";

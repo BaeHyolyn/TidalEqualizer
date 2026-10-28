@@ -4,7 +4,7 @@ import React from "react";
 import { heading, Pill, text, type Looks } from "./NowPlayingTab";
 import { settings, vizSettings } from "./Settings";
 import { copyText, pasteText } from "./player.native";
-import { setPreview } from "./Visualizer";
+import { COVER, coverImageSrc, setPreview } from "./Visualizer";
 import { autoPoints, coverPixels, defaultViz, MAX_COLOR_POINTS, sampleColors, sanitizeViz, VIZ_PRESETS, VIZ_RANGES, type VizSettings } from "./viz";
 
 // Controls for the visualizer. Changes are stored right away and the visualizer reads them on its next frame.
@@ -120,7 +120,7 @@ const Section = ({ title, viz, keys, update, children }: { title: string; viz: V
 };
 const Row = ({ children }: { children: React.ReactNode }) => <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 28px" }}>{children}</div>;
 
-const coverSrc = () => document.querySelector<HTMLImageElement>("[data-test=new-now-playing] [class*=_artworkWrapper_] img")?.src ?? "";
+const coverSrc = () => coverImageSrc(document.querySelector(COVER));
 
 /**
  * The current cover with a dot where each colour comes from. Auto picks them again from every new cover;
