@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.1
 
 ### Fixed
 - The Visualizer and Equalizer tabs couldn't be scrolled, so the last sections (Response, Performance, Share) were cut off below the window (#14).
