@@ -100,10 +100,14 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	const ctx = canvas.getContext("2d")!;
 	unloads.add(() => canvas.remove());
 
-	let cover: HTMLImageElement | null = null;
+	// What beats with the bass: the cover's own box (image, TIDAL's 1px border and glare together), not just the image
+	let cover: HTMLElement | null = null;
 	let coverSrc = "";
 	let artColor: string | null = null;
-	const restoreCover = () => cover && (cover.style.scale = "");
+	const restoreCover = () => {
+		if (cover) cover.style.scale = "";
+		canvas.style.scale = "";
+	};
 	unloads.add(restoreCover);
 
 	// Per-bar buffers, rebuilt when the bar count or frequency range changes
@@ -162,7 +166,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			restoreCover();
 			return;
 		}
-		if (img !== cover) restoreCover(), (cover = img!);
+		const beatTarget = img!.parentElement !== null && img!.parentElement.closest("[class*=_artworkWrapper_]") ? img!.parentElement : img!;
+		if (beatTarget !== cover) restoreCover(), (cover = beatTarget);
 		const wrapper = img!.closest<HTMLElement>("[class*=_artworkWrapper_]")!;
 		const view = wrapper.parentElement!;
 		if (canvas.previousElementSibling !== wrapper) {
@@ -199,7 +204,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			let bass = 0;
 			const n = Math.max(1, Math.round(bands * 0.15));
 			for (let b = 0; b < n; b++) bass += shown[b];
-			img!.style.scale = String(1 + (bass / n) * v.pulse * 0.06);
+			// The bars grow with it so the cover never covers them
+			cover!.style.scale = canvas.style.scale = String(1 + (bass / n) * v.pulse * 0.06);
 		} else restoreCover();
 	};
 
