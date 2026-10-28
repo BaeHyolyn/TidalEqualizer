@@ -1,7 +1,7 @@
 {
 	"name": "TidalEQ",
 	"description": "A real equalizer inside TIDAL: 10 parametric bands, presets, smart volume and limiter. Needs mpv.",
-	"homepage": "https://github.com/BaeHyolyn/tidal-presence",
+	"homepage": "https://github.com/BaeHyolyn/TidalEqualizer",
 	"author": {
 		"name": "BaeHyolyn",
 		"url": "https://github.com/BaeHyolyn",
