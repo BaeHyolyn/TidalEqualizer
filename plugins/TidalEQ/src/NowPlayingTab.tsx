@@ -38,7 +38,9 @@ const Panel = ({ looks }: { looks: Looks }) => {
 	const setMacro = (key: keyof Macros, v: number) => update({ macros: { ...eq.macros, [key]: v } });
 
 	return (
-		<div style={{ height: "100%", overflowY: "auto", padding: "0 24px 24px", boxSizing: "border-box", color: "#fff", fontFamily: "inherit" }}>
+		// Column flex + auto margins centers the content on the artwork, and still scrolls when it doesn't fit
+		<div style={{ height: "100%", overflowY: "auto", padding: "0 24px", boxSizing: "border-box", color: "#fff", fontFamily: "inherit", display: "flex", flexDirection: "column" }}>
+			<div style={{ margin: "auto 0" }}>
 			<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 24 }}>
 				<p style={text}>{eq.enabled ? "Playing through mpv with your equalizer." : "Off: TIDAL plays normally."}</p>
 				<div style={{ display: "flex", gap: 8 }}>
@@ -75,6 +77,7 @@ const Panel = ({ looks }: { looks: Looks }) => {
 				</div>
 			</div>
 			<p style={{ ...text, fontSize: 12, marginTop: 32 }}>Preamp, smart volume and limiter are in the plugin settings.</p>
+			</div>
 		</div>
 	);
 };
