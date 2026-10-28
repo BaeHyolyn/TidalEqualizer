@@ -1,6 +1,7 @@
 import type { PlaybackInfo } from "@luna/lib";
 import { fetchMediaItemStream } from "@luna/lib.native";
 import { spawn, type ChildProcess } from "child_process";
+import { clipboard } from "electron";
 import { randomBytes } from "crypto";
 import { closeSync, openSync, readSync, rmSync } from "fs";
 import { createServer, type Server } from "http";
@@ -256,3 +257,7 @@ export const stopPlayer = async () => {
 		pending.clear();
 	}
 };
+
+// The page's clipboard API is blocked inside TIDAL; Electron's works
+export const copyText = (text: string) => clipboard.writeText(text);
+export const pasteText = () => clipboard.readText();

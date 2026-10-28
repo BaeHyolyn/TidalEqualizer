@@ -8,7 +8,12 @@ import { defaultViz, type VizSettings } from "./viz";
 
 export const DEFAULT_MPV = "C:\\Program Files\\MPV Player\\mpv.exe";
 
-export const settings = await ReactiveStore.getPluginStorage("TidalEQ", { ...defaultSettings(), mpvPath: DEFAULT_MPV, viz: defaultViz() });
+export const settings = await ReactiveStore.getPluginStorage("TidalEQ", {
+	...defaultSettings(),
+	mpvPath: DEFAULT_MPV,
+	viz: defaultViz(),
+	vizPresets: [] as { name: string; viz: Partial<VizSettings> }[], // looks the user saved
+});
 // Stored visualizer settings over the defaults, so options added in later versions get their default
 export const vizSettings = (): VizSettings => ({ ...defaultViz(), ...settings.viz });
 

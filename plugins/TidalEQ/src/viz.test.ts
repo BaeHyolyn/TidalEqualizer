@@ -1,6 +1,6 @@
 import assert from "assert";
 
-import { analyze, bandEdges, bandLevels, FFT_SIZE, PCM_RATE, sampleColors, smoothBars } from "./viz";
+import { analyze, autoPoints, bandEdges, bandLevels, defaultViz, FFT_SIZE, PCM_RATE, sampleColors, sanitizeViz, smoothBars } from "./viz";
 
 // A full-scale 1 kHz sine peaks at ~0 dB in the 1 kHz bin and is far lower elsewhere
 const n = PCM_RATE;
@@ -33,9 +33,26 @@ assert(risen - state[3] < risen * 0.2, "falls slower than it rose");
 for (let i = 0; i < 200; i++) smoothBars(state, new Float32Array(8), out, 16, opts);
 assert(Math.max(...out) < 0.01, "everything settles back to zero");
 
-// Colour points: left half red, right half blue; each point reads its side (nudged 20% toward white)
+// Colour points: left half red, right half blue, top rows black; each point reads its side, dark ones are lifted
 const px = new Uint8ClampedArray(64 * 64 * 4);
-for (let i = 0; i < 64 * 64; i++) px.set(i % 64 < 32 ? [255, 0, 0, 255] : [0, 0, 255, 255], i * 4);
-assert.deepStrictEqual(sampleColors(px, [[0.1, 0.5], [0.9, 0.5], [2, -1]]), ["rgb(255,51,51)", "rgb(51,51,255)", "rgb(51,51,255)"]);
+for (let i = 0; i < 64 * 64; i++) px.set(i < 64 * 8 ? [0, 0, 0, 255] : i % 64 < 32 ? [255, 0, 0, 255] : [0, 0, 255, 255], i * 4);
+assert.deepStrictEqual(sampleColors(px, [[0.1, 0.5], [0.9, 0.5], [2, 2]]), ["rgb(255,26,26)", "rgb(26,26,255)", "rgb(26,26,255)"]);
+assert.deepStrictEqual(sampleColors(px, [[0.5, 0]]), ["rgb(140,140,140)"], "black is lifted to a visible grey");
+
+// Auto points land on the two vivid halves, not on the black band
+const auto = autoPoints(px, 2);
+assert(auto.every(([, y]) => y > 8 / 63), "no auto point on black");
+assert(auto.some(([x]) => x < 0.5) && auto.some(([x]) => x > 0.5), "one point on each colour");
+
+// Pasted settings: unknown keys dropped, bad values ignored, numbers clamped, points validated
+const pasted = sanitizeViz({ bars: 9999, style: "laser", glow: "lots", color1: "red", colorPoints: [[0.5, 2], ["x", 1]], evil: "<script>", opacity: 0.5 });
+assert.strictEqual(pasted.bars, 256);
+assert.strictEqual(pasted.style, defaultViz().style);
+assert.strictEqual(pasted.glow, defaultViz().glow);
+assert.strictEqual(pasted.color1, defaultViz().color1);
+assert.deepStrictEqual(pasted.colorPoints, [[0.5, 1]]);
+assert.strictEqual(pasted.opacity, 0.5);
+assert(!("evil" in pasted), "unknown keys are dropped");
+assert.deepStrictEqual(sanitizeViz("nonsense"), defaultViz());
 
 console.log("viz: all tests passed");

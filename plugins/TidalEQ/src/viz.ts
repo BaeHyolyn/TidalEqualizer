@@ -184,7 +184,32 @@ export const smoothBars = (
 export const MAX_COLOR_POINTS = 8;
 const GRID = 64; // the cover is sampled from a 64x64 copy
 
-/** Average colour around each point of a GRID x GRID RGBA image, nudged toward white so it shows on TIDAL's tinted background. */
+/** RGB 0..255 → HSL 0..1, and back. */
+const toHsl = (r: number, g: number, b: number): [number, number, number] => {
+	[r, g, b] = [r / 255, g / 255, b / 255];
+	const max = Math.max(r, g, b);
+	const min = Math.min(r, g, b);
+	const l = (max + min) / 2;
+	if (max === min) return [0, 0, l];
+	const d = max - min;
+	const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+	const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+	return [h / 6, s, l];
+};
+const fromHsl = (h: number, s: number, l: number) => {
+	const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+	const p = 2 * l - q;
+	const ch = (t: number) => {
+		t = (t + 1) % 1;
+		const v = t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p;
+		return Math.round(v * 255);
+	};
+	return `rgb(${ch(h + 1 / 3)},${ch(h)},${ch(h - 1 / 3)})`;
+};
+// Colours darker than this are lifted, so a point on a black area still shows on TIDAL's tinted background
+const MIN_LIGHTNESS = 0.55;
+
+/** Average colour around each point of a GRID x GRID RGBA image, brightened when too dark to see. */
 export const sampleColors = (pixels: Uint8ClampedArray, points: [number, number][]) =>
 	points.map(([px, py]) => {
 		const cx = Math.round(Math.min(1, Math.max(0, px)) * (GRID - 1));
@@ -198,8 +223,8 @@ export const sampleColors = (pixels: Uint8ClampedArray, points: [number, number]
 				b += pixels[i + 2];
 				n++;
 			}
-		const mix = (c: number) => Math.round((c / n) * 0.8 + 255 * 0.2);
-		return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+		const [h, sat, l] = toHsl(r / n, g / n, b / n);
+		return fromHsl(h, sat, Math.max(l, MIN_LIGHTNESS));
 	});
 
 const coverCache = new Map<string, Promise<Uint8ClampedArray | null>>();
@@ -221,4 +246,106 @@ export const coverPixels = (src: string) => {
 		coverCache.set(src, p);
 	}
 	return p;
+};
+
+/**
+ * Points on the most vivid, mutually different colours of the cover (GRID x GRID RGBA pixels):
+ * the most vivid first, then each next one as vivid as possible and as far as possible from those already picked.
+ */
+export const autoPoints = (pixels: Uint8ClampedArray, count = 4): [number, number][] => {
+	const cells: { x: number; y: number; rgb: [number, number, number]; vivid: number }[] = [];
+	for (let y = 2; y < GRID - 2; y += 2)
+		for (let x = 2; x < GRID - 2; x += 2) {
+			const i = (y * GRID + x) * 4;
+			const rgb: [number, number, number] = [pixels[i], pixels[i + 1], pixels[i + 2]];
+			const [, sat, l] = toHsl(...rgb);
+			cells.push({ x, y, rgb, vivid: sat * (1 - Math.abs(l - 0.55) * 1.4) + l * 0.15 });
+		}
+	const picked: typeof cells = [];
+	const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) / 441;
+	// Colours closer than this to one already picked are skipped, unless the cover has nothing else
+	let minApart = 0.18;
+	while (picked.length < count && picked.length < cells.length) {
+		let best: (typeof cells)[number] | null = null;
+		let bestScore = -Infinity;
+		for (const c of cells) {
+			const apart = picked.length ? Math.min(...picked.map((p) => dist(p.rgb, c.rgb))) : 1;
+			if (apart < minApart) continue;
+			// Being different from the colours already picked matters more than being vivid, so the ring isn't one colour 4 times
+			const score = c.vivid * 0.35 + apart * 0.65;
+			if (score > bestScore && !picked.includes(c)) (best = c), (bestScore = score);
+		}
+		if (best) picked.push(best);
+		else minApart /= 2; // a one-colour cover: accept closer colours
+	}
+	return picked.map((c) => [Math.round((c.x / (GRID - 1)) * 1000) / 1000, Math.round((c.y / (GRID - 1)) * 1000) / 1000]);
+};
+
+/** Slider limits for every numeric setting: used by the panel and to clamp pasted settings. */
+export const VIZ_RANGES: Partial<Record<keyof VizSettings, [min: number, max: number, step: number]>> = {
+	bars: [16, 256, 2],
+	width: [0.1, 1, 0.05],
+	length: [8, 200, 1],
+	gap: [-40, 80, 1],
+	opacity: [0.1, 1, 0.05],
+	glow: [0, 40, 1],
+	rotation: [0, 359, 1],
+	spin: [-30, 30, 1],
+	pulse: [0, 1, 0.05],
+	smoothing: [0, 1, 0.05],
+	attack: [5, 300, 1],
+	decay: [20, 1500, 10],
+	sensitivity: [-12, 40, 1],
+	range: [20, 90, 1],
+	minFreq: [20, 500, 5],
+	maxFreq: [1000, 11000, 100],
+	tilt: [0, 6, 0.5],
+	syncOffset: [-300, 300, 10],
+};
+const CHOICES: Partial<Record<keyof VizSettings, readonly unknown[]>> = {
+	style: ["bars", "wave", "dots"],
+	shape: ["square", "circle"],
+	placement: ["outside", "inside", "both"],
+	colorMode: ["artwork", "solid", "gradient", "spectrum"],
+	fps: [30, 60, 120, 0],
+};
+
+/** Settings from outside (pasted, or a saved preset): keeps only known keys with valid values, clamped, over the defaults. */
+export const sanitizeViz = (input: unknown): VizSettings => {
+	const out = defaultViz();
+	if (!input || typeof input !== "object") return out;
+	const src = input as Record<string, unknown>;
+	const o = out as Record<string, unknown>;
+	for (const key of Object.keys(out) as (keyof VizSettings)[]) {
+		const v = src[key];
+		const range = VIZ_RANGES[key];
+		const choices = CHOICES[key];
+		if (choices) {
+			if (choices.includes(v)) o[key] = v;
+		} else if (range) {
+			if (typeof v === "number" && Number.isFinite(v)) o[key] = Math.min(range[1], Math.max(range[0], v));
+		} else if (key === "colorPoints") {
+			if (Array.isArray(v)) {
+				const pts = v
+					.filter((p): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && Number.isFinite(n)))
+					.slice(0, MAX_COLOR_POINTS)
+					.map(([x, y]) => [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))] as [number, number]);
+				if (pts.length) o[key] = pts;
+			}
+		} else if (key === "color1" || key === "color2") {
+			if (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)) o[key] = v;
+		} else if (typeof v === typeof o[key]) o[key] = v;
+	}
+	return out;
+};
+
+/** Ready-made looks. Applying one keeps the on/off switch and the colour points. */
+export const VIZ_PRESETS: Record<string, { label: string; viz: Partial<VizSettings> }> = {
+	default: { label: "Default", viz: {} },
+	minimal: { label: "Minimal", viz: { bars: 72, width: 0.35, length: 28, glow: 0, opacity: 0.7, pulse: 0, smoothing: 0.5 } },
+	neon: { label: "Neon ring", viz: { shape: "circle", colorMode: "spectrum", bars: 128, width: 0.5, glow: 24, spin: 2, length: 60 } },
+	aura: { label: "Aura", viz: { style: "wave", length: 70, glow: 30, opacity: 0.9, smoothing: 0.7, pulse: 0.4, decay: 400 } },
+	club: { label: "Club", viz: { bars: 64, length: 110, pulse: 0.8, peaks: true, decay: 300, sensitivity: 18, glow: 14 } },
+	pearls: { label: "Pearls", viz: { style: "dots", bars: 72, length: 40, glow: 10, width: 0.7 } },
+	inner: { label: "Inner glow", viz: { placement: "inside", bars: 128, length: 60, opacity: 0.6, glow: 16, width: 0.4 } },
 };

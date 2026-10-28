@@ -20,6 +20,10 @@ let pcmDone = true;
 let pcmLeftover = new Uint8Array(0);
 
 /** Called on every track load: forget the old samples and read the new ones as they're decoded. */
+// While the Visualizer tab is open and the music is paused, animate a made-up spectrum so changes can still be seen
+let preview = false;
+export const setPreview = (on: boolean) => (preview = on);
+
 export const resetPcm = (decoding: boolean) => {
 	pcmLength = 0;
 	pcmBytes = 0;
@@ -71,6 +75,12 @@ const albumColor = async (): Promise<string | null> => {
 	if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
 	const mix = (i: number) => Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.55 + 255 * 0.45);
 	return `rgb(${mix(1)},${mix(3)},${mix(5)})`;
+};
+
+/** Rough brightness of an rgb()/#hex colour, 0..255. */
+const lum = (c: string) => {
+	const n = c.startsWith("#") ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : (c.match(/\d+/g) ?? []).map(Number);
+	return (n[0] ?? 0) * 0.3 + (n[1] ?? 0) * 0.59 + (n[2] ?? 0) * 0.11;
 };
 
 /**
@@ -199,7 +209,11 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		for (let b = 0; b < bands; b++) {
 			const fc = Math.sqrt(edges[b] * edges[b + 1]);
 			const db = levels[b] + eqDb[b] + v.tilt * Math.log2(fc / 1000);
-			target[b] = PlayState.playing ? Math.min(1, Math.max(0, (db + v.sensitivity + v.range) / v.range)) : 0;
+			target[b] = PlayState.playing
+				? Math.min(1, Math.max(0, (db + v.sensitivity + v.range) / v.range))
+				: preview
+					? 0.25 + 0.35 * (1 - b / bands) * (0.6 + 0.4 * Math.sin(now / 180)) + 0.2 * Math.max(0, Math.sin(now / 260 + b * 0.55))
+					: 0;
 		}
 		smoothBars(state, target, shown, dt, v);
 		for (let b = 0; b < bands; b++) peaks[b] = Math.max(shown[b], peaks[b] - dt / 1500);
@@ -311,7 +325,14 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		}
 		ctx.globalAlpha = v.opacity;
 		ctx.shadowBlur = v.glow;
-		ctx.shadowColor = v.colorMode === "solid" ? v.color1 : v.colorMode === "artwork" && pointColors.length ? pointColors[0] : art;
+		// Glow in the lightest colour in use: a dark glow just looks like a smudge
+		const lightest = (cs: string[]) => cs.reduce((a, c) => (lum(c) > lum(a) ? c : a), cs[0]);
+		ctx.shadowColor =
+			v.colorMode === "solid" ? v.color1
+			: v.colorMode === "gradient" ? lightest([v.color1, v.color2])
+			: v.colorMode === "artwork" && pointColors.length ? lightest(pointColors)
+			: v.colorMode === "spectrum" ? "rgba(255,255,255,0.6)"
+			: art;
 		ctx.strokeStyle = ctx.fillStyle = paint;
 		ctx.lineCap = v.roundCaps ? "round" : "butt";
 		ctx.lineJoin = "round";

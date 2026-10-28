@@ -1,14 +1,21 @@
+import { PlayState } from "@luna/lib";
 import React from "react";
 
 import { heading, Pill, text, type Looks } from "./NowPlayingTab";
 import { settings, vizSettings } from "./Settings";
-import { coverPixels, defaultViz, MAX_COLOR_POINTS, sampleColors, type VizSettings } from "./viz";
+import { copyText, pasteText } from "./player.native";
+import { setPreview } from "./Visualizer";
+import { autoPoints, coverPixels, defaultViz, MAX_COLOR_POINTS, sampleColors, sanitizeViz, VIZ_PRESETS, VIZ_RANGES, type VizSettings } from "./viz";
 
 // Controls for the visualizer. Changes are stored right away and the visualizer reads them on its next frame.
+// Every control can go back to its own default (↺, or double-click a slider), every section too, and everything at once.
+
+type Key = keyof VizSettings;
+type Update = (next: Partial<VizSettings>) => void;
 
 const useViz = () => {
 	const [viz, setViz] = React.useState(vizSettings);
-	const update = (next: Partial<VizSettings>) => {
+	const update: Update = (next) => {
 		const merged = { ...vizSettings(), ...next }; // from storage, so quick successive changes all stick
 		setViz(merged);
 		settings.viz = merged;
@@ -16,44 +23,107 @@ const useViz = () => {
 	return [viz, update] as const;
 };
 
-const value: React.CSSProperties = { ...text, fontSize: 12, color: "#fff", width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" };
+const DEFAULTS = defaultViz();
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const changed = (viz: VizSettings, keys: Key[]) => keys.filter((k) => !same(viz[k], DEFAULTS[k]));
+const defaultsOf = (keys: Key[]) => Object.fromEntries(keys.map((k) => [k, DEFAULTS[k]])) as Partial<VizSettings>;
+const show = (v: unknown) => (typeof v === "boolean" ? (v ? "On" : "Off") : String(v));
 
-const Slider = ({ label, min, max, step = 1, unit = "", v, set }: { label: string; min: number; max: number; step?: number; unit?: string; v: number; set: (v: number) => void }) => (
-	<label style={{ display: "flex", alignItems: "center", gap: 12, flex: "1 1 260px", minWidth: 0 }}>
-		<span style={{ ...text, color: "#fff", width: 92, flexShrink: 0 }}>{label}</span>
-		<input type="range" min={min} max={max} step={step} value={v} onChange={(e) => set(+e.target.value)} style={{ flex: 1, minWidth: 0, accentColor: "#fff" }} />
-		<span style={value}>
-			{Number.isInteger(step) ? v : v.toFixed(2)}
-			{unit}
-		</span>
-	</label>
-);
+const label: React.CSSProperties = { ...text, color: "#fff", width: 92, flexShrink: 0 };
+const small: React.CSSProperties = { ...text, fontSize: 12 };
+const linkButton: React.CSSProperties = { ...small, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" };
 
-const Choice = <T extends string | number | boolean>({ looks, label, options, v, set }: { looks: Looks; label: string; options: [T, string][]; v: T; set: (v: T) => void }) => (
-	<div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-		<span style={{ ...text, color: "#fff", width: 92 }}>{label}</span>
+/** Shown only when the value differs from its default; puts that one setting back. */
+const ResetOne = ({ viz, k, update }: { viz: VizSettings; k: Key; update: Update }) => {
+	const off = same(viz[k], DEFAULTS[k]);
+	return (
+		<button
+			type="button"
+			title={`Back to default (${show(DEFAULTS[k])})`}
+			aria-label={`Reset ${k} to default`}
+			onClick={() => update({ [k]: DEFAULTS[k] })}
+			style={{ ...small, width: 20, flexShrink: 0, background: "none", border: "none", padding: 0, cursor: off ? "default" : "pointer", color: "#fff", visibility: off ? "hidden" : "visible" }}
+		>
+			↺
+		</button>
+	);
+};
+
+const Slider = ({ viz, k, name, unit = "", update }: { viz: VizSettings; k: Key; name: string; unit?: string; update: Update }) => {
+	const [min, max, step] = VIZ_RANGES[k]!;
+	const v = viz[k] as number;
+	const [typing, setTyping] = React.useState<string | null>(null);
+	const decimals = step < 1 ? 2 : 0;
+	const commit = () => {
+		const n = Number(typing);
+		if (typing !== null && typing.trim() !== "" && Number.isFinite(n)) update({ [k]: Math.min(max, Math.max(min, n)) });
+		setTyping(null);
+	};
+	return (
+		<div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 280px", minWidth: 0 }}>
+			<span style={label}>{name}</span>
+			<input
+				type="range" min={min} max={max} step={step} value={v} aria-label={name}
+				title="Double-click to go back to the default"
+				onChange={(e) => update({ [k]: +e.target.value })}
+				onDoubleClick={() => update({ [k]: DEFAULTS[k] })}
+				style={{ flex: 1, minWidth: 0, accentColor: "#fff" }}
+			/>
+			{typing === null ? (
+				<button type="button" title="Click to type a value" onClick={() => setTyping(String(v))}
+					style={{ ...small, color: "#fff", width: 76, textAlign: "right", fontVariantNumeric: "tabular-nums", background: "none", border: "none", padding: 0, cursor: "text" }}>
+					{v.toFixed(decimals)}
+					{unit}
+				</button>
+			) : (
+				<input
+					autoFocus type="number" min={min} max={max} step={step} value={typing} aria-label={`${name} value`}
+					onChange={(e) => setTyping(e.target.value)} onBlur={commit}
+					onKeyDown={(e) => (e.key === "Enter" ? commit() : e.key === "Escape" && setTyping(null))}
+					style={{ ...small, color: "#fff", width: 76, textAlign: "right", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 4 }}
+				/>
+			)}
+			<ResetOne viz={viz} k={k} update={update} />
+		</div>
+	);
+};
+
+const Choice = <K extends Key>({ looks, viz, k, name, options, update }: { looks: Looks; viz: VizSettings; k: K; name: string; options: [VizSettings[K], string][]; update: Update }) => (
+	<div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+		<span style={label}>{name}</span>
 		<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-			{options.map(([o, name]) => (
-				<Pill key={String(o)} looks={looks} pressed={o === v} onClick={() => set(o)}>
-					{name}
+			{options.map(([o, optionName]) => (
+				<Pill key={String(o)} looks={looks} pressed={o === viz[k]} onClick={() => update({ [k]: o })}>
+					{optionName}
 				</Pill>
 			))}
 		</div>
+		<ResetOne viz={viz} k={k} update={update} />
 	</div>
 );
 
-const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-	<section style={{ marginTop: 28 }}>
-		<h3 style={heading}>{title}</h3>
-		<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{children}</div>
-	</section>
-);
-const Row = ({ children }: { children: React.ReactNode }) => <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px" }}>{children}</div>;
+const Section = ({ title, viz, keys, update, children }: { title: string; viz: VizSettings; keys: Key[]; update: Update; children: React.ReactNode }) => {
+	const dirty = changed(viz, keys).length > 0;
+	return (
+		<section style={{ marginTop: 28 }}>
+			<div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+				<h3 style={heading}>{title}</h3>
+				{dirty && (
+					<button type="button" style={linkButton} onClick={() => update(defaultsOf(keys))}>
+						Reset {title.toLowerCase()}
+					</button>
+				)}
+			</div>
+			<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{children}</div>
+		</section>
+	);
+};
+const Row = ({ children }: { children: React.ReactNode }) => <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 28px" }}>{children}</div>;
 
 const coverSrc = () => document.querySelector<HTMLImageElement>("[data-test=new-now-playing] [class*=_artworkWrapper_] img")?.src ?? "";
 
 /** The current cover with draggable dots: each dot is where one colour is taken from. Click adds, double-click removes. */
-const ColorPoints = ({ points, set }: { points: [number, number][]; set: (p: [number, number][]) => void }) => {
+const ColorPoints = ({ looks, points, set }: { looks: Looks; points: [number, number][]; set: (p: [number, number][]) => void }) => {
 	const [src, setSrc] = React.useState(coverSrc);
 	const [pixels, setPixels] = React.useState<Uint8ClampedArray | null>(null);
 	const box = React.useRef<HTMLDivElement>(null);
@@ -107,124 +177,259 @@ const ColorPoints = ({ points, set }: { points: [number, number][]; set: (p: [nu
 				))}
 			</div>
 			<div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, flex: "1 1 200px" }}>
-				<p style={{ ...text, fontSize: 12 }}>
-					Each dot picks a colour from the cover; the ring blends them in order. Drag a dot to move it, click the cover to add one (up to {MAX_COLOR_POINTS}), double-click a dot to remove it.
+				<p style={small}>
+					Each dot picks a colour from the cover; the ring blends them in order. Drag a dot to move it, click the cover to add one (up to {MAX_COLOR_POINTS}), double-click a dot to remove it. Dark areas are brightened so they still show.
 				</p>
 				<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
 					{colors.map((c, i) => (
 						<span key={i} style={{ width: 28, height: 28, borderRadius: 6, background: c, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.25)" }} />
 					))}
 				</div>
+				<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+					<Pill looks={looks} pressed={false} onClick={() => pixels && set(autoPoints(pixels, points.length))}>
+						Auto: most vivid colours
+					</Pill>
+					<Pill looks={looks} pressed={false} onClick={() => set(DEFAULTS.colorPoints)}>
+						Reset points
+					</Pill>
+				</div>
 			</div>
 		</div>
 	);
 };
 
+/** Built-in looks, the user's saved ones, and saving the current look under a name. */
+const Presets = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; update: Update }) => {
+	const [saved, setSaved] = React.useState(() => [...(settings.vizPresets ?? [])]);
+	const [naming, setNaming] = React.useState<string | null>(null);
+	// A preset changes the look only: on/off and the colour points stay
+	const apply = (p: Partial<VizSettings>) => {
+		const now = vizSettings();
+		update({ ...sanitizeViz({ ...DEFAULTS, ...p }), enabled: now.enabled, colorPoints: now.colorPoints });
+	};
+	const store = (list: typeof saved) => {
+		setSaved(list);
+		settings.vizPresets = list;
+	};
+	const save = () => {
+		const name = naming?.trim();
+		if (!name) return setNaming(null);
+		const { enabled: _, colorPoints: __, ...look } = viz;
+		store([...saved.filter((p) => p.name !== name), { name, viz: look }]);
+		setNaming(null);
+	};
+	return (
+		<div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+			<div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+				{Object.entries(VIZ_PRESETS).map(([key, p]) => (
+					<Pill key={key} looks={looks} pressed={false} onClick={() => apply(p.viz)}>
+						{p.label}
+					</Pill>
+				))}
+			</div>
+			<div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+				{saved.map((p) => (
+					<span key={p.name} style={{ display: "inline-flex", alignItems: "center" }}>
+						<Pill looks={looks} pressed={false} onClick={() => apply(p.viz)}>
+							{p.name}
+						</Pill>
+						<button type="button" title={`Delete "${p.name}"`} aria-label={`Delete preset ${p.name}`} onClick={() => store(saved.filter((x) => x !== p))}
+							style={{ ...small, background: "none", border: "none", cursor: "pointer", color: "#fff", padding: "0 4px" }}>
+							×
+						</button>
+					</span>
+				))}
+				{naming === null ? (
+					<button type="button" style={linkButton} onClick={() => setNaming("")}>
+						Save current look…
+					</button>
+				) : (
+					<span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+						<input autoFocus value={naming} placeholder="Name" maxLength={30} aria-label="Preset name"
+							onChange={(e) => setNaming(e.target.value)} onKeyDown={(e) => (e.key === "Enter" ? save() : e.key === "Escape" && setNaming(null))}
+							style={{ ...small, color: "#fff", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 4, padding: "4px 8px" }} />
+						<button type="button" style={linkButton} onClick={save}>Save</button>
+						<button type="button" style={linkButton} onClick={() => setNaming(null)}>Cancel</button>
+					</span>
+				)}
+			</div>
+		</div>
+	);
+};
+
+/** Copy the settings as text to share them, or paste someone's (checked and clamped before use). */
+const Share = ({ viz, update }: { viz: VizSettings; update: Update }) => {
+	const [status, setStatus] = React.useState("");
+	const copy = async () => {
+		try {
+			await copyText(JSON.stringify({ tidaleqVisualizer: viz }));
+			setStatus("Copied. Paste it anywhere to share your look.");
+		} catch {
+			setStatus("Couldn't use the clipboard.");
+		}
+	};
+	const paste = async () => {
+		try {
+			const parsed = JSON.parse(await pasteText());
+			const incoming = parsed?.tidaleqVisualizer;
+			if (!incoming || typeof incoming !== "object") return setStatus("The clipboard doesn't have visualizer settings.");
+			update({ ...sanitizeViz(incoming), enabled: viz.enabled });
+			setStatus("Settings pasted.");
+		} catch {
+			setStatus("The clipboard doesn't have visualizer settings.");
+		}
+	};
+	return (
+		<div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+			<button type="button" style={linkButton} onClick={copy}>Copy settings</button>
+			<button type="button" style={linkButton} onClick={paste}>Paste settings</button>
+			{status && <span style={small} role="status">{status}</span>}
+		</div>
+	);
+};
+
+const SECTIONS: Record<string, Key[]> = {
+	Look: ["style", "shape", "placement", "mirror", "roundCaps", "peaks"],
+	Size: ["bars", "width", "length", "gap"],
+	Color: ["colorMode", "color1", "color2", "colorPoints", "opacity", "glow"],
+	Motion: ["rotation", "spin", "pulse", "smoothing", "attack", "decay"],
+	Response: ["sensitivity", "range", "minFreq", "maxFreq", "tilt", "syncOffset"],
+	Performance: ["fps"],
+};
+
 export const VizPanel = ({ looks }: { looks: Looks }) => {
 	const [viz, update] = useViz();
-	const set = <K extends keyof VizSettings>(key: K) => (v: VizSettings[K]) => update({ [key]: v } as Partial<VizSettings>);
+	const [confirmReset, setConfirmReset] = React.useState(false);
+	const [playing, setPlaying] = React.useState(PlayState.playing);
 	const onOff: [boolean, string][] = [[true, "On"], [false, "Off"]];
+	const p = { viz, update };
+
+	// Animate a preview while this tab is open and the music is paused
+	React.useEffect(() => {
+		setPreview(true);
+		const t = setInterval(() => setPlaying(PlayState.playing), 500);
+		return () => {
+			setPreview(false);
+			clearInterval(t);
+		};
+	}, []);
+
+	const widthName = viz.style === "wave" ? "Line width" : viz.style === "dots" ? "Dot size" : "Thickness";
 
 	return (
 		<div style={{ minHeight: "100%", color: "#fff", fontFamily: "inherit", display: "flex", flexDirection: "column" }}>
 			<div style={{ margin: "auto 0", paddingBottom: 48 }}>
-				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
 					<p style={text}>
-						{!settings.enabled ? "Turn the equalizer on: the visualizer reads the audio mpv plays." : "Spectrum around the cover, after your equalizer."}
+						{!settings.enabled
+							? "Turn the equalizer on: the visualizer reads the audio mpv plays."
+							: playing
+								? "Spectrum around the cover, after your equalizer."
+								: "Music paused: showing a preview so you can still see your changes."}
 					</p>
-					<div style={{ display: "flex", gap: 8 }}>
+					<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
 						<Pill looks={looks} pressed={viz.enabled} onClick={() => update({ enabled: !viz.enabled })}>
 							{viz.enabled ? "On" : "Off"}
 						</Pill>
-						<Pill looks={looks} pressed={false} onClick={() => update({ ...defaultViz(), enabled: viz.enabled })}>
-							Reset
-						</Pill>
+						{confirmReset ? (
+							<>
+								<span style={small}>Reset everything?</span>
+								<Pill looks={looks} pressed={false} onClick={() => (update({ ...DEFAULTS, enabled: viz.enabled }), setConfirmReset(false))}>Yes</Pill>
+								<Pill looks={looks} pressed={false} onClick={() => setConfirmReset(false)}>No</Pill>
+							</>
+						) : (
+							<Pill looks={looks} pressed={false} onClick={() => setConfirmReset(true)}>Reset all</Pill>
+						)}
 					</div>
 				</div>
 
 				<div style={{ opacity: viz.enabled ? 1 : 0.4, transition: "opacity .2s" }}>
-					<Section title="Look">
-						<Choice looks={looks} label="Style" options={[["bars", "Bars"], ["wave", "Wave"], ["dots", "Dots"]]} v={viz.style} set={set("style")} />
-						<Choice looks={looks} label="Shape" options={[["square", "Follow cover"], ["circle", "Circle"]]} v={viz.shape} set={set("shape")} />
-						<Choice looks={looks} label="Placement" options={[["outside", "Outside"], ["inside", "Inside"], ["both", "Both ways"]]} v={viz.placement} set={set("placement")} />
-						<Choice looks={looks} label="Mirror" options={onOff} v={viz.mirror} set={set("mirror")} />
-						<Choice looks={looks} label="Round ends" options={onOff} v={viz.roundCaps} set={set("roundCaps")} />
-						<Choice looks={looks} label="Peaks" options={onOff} v={viz.peaks} set={set("peaks")} />
+					<section style={{ marginTop: 28 }}>
+						<h3 style={heading}>Presets</h3>
+						<Presets looks={looks} viz={viz} update={update} />
+					</section>
+
+					<Section title="Look" keys={SECTIONS.Look} {...p}>
+						<Choice looks={looks} {...p} k="style" name="Style" options={[["bars", "Bars"], ["wave", "Wave"], ["dots", "Dots"]]} />
+						<Choice looks={looks} {...p} k="shape" name="Shape" options={[["square", "Follow cover"], ["circle", "Circle"]]} />
+						<Choice looks={looks} {...p} k="placement" name="Placement" options={[["outside", "Outside"], ["inside", "Inside"], ["both", "Both ways"]]} />
+						<Choice looks={looks} {...p} k="mirror" name="Mirror" options={onOff} />
+						{viz.style === "bars" && <Choice looks={looks} {...p} k="roundCaps" name="Round ends" options={onOff} />}
+						{viz.style !== "wave" && <Choice looks={looks} {...p} k="peaks" name="Peaks" options={onOff} />}
 					</Section>
 
-					<Section title="Size">
+					<Section title="Size" keys={SECTIONS.Size} {...p}>
 						<Row>
-							<Slider label="Bars" min={16} max={256} step={2} v={viz.bars} set={set("bars")} />
-							<Slider label="Thickness" min={0.1} max={1} step={0.05} v={viz.width} set={set("width")} />
+							<Slider {...p} k="bars" name={viz.style === "wave" ? "Detail" : viz.style === "dots" ? "Dots" : "Bars"} />
+							<Slider {...p} k="width" name={widthName} />
 						</Row>
 						<Row>
-							<Slider label="Height" min={8} max={200} unit=" px" v={viz.length} set={set("length")} />
-							<Slider label="Distance" min={-40} max={80} unit=" px" v={viz.gap} set={set("gap")} />
+							<Slider {...p} k="length" name="Height" unit=" px" />
+							<Slider {...p} k="gap" name="Distance" unit=" px" />
 						</Row>
 					</Section>
 
-					<Section title="Color">
-						<Choice looks={looks} label="Colors" options={[["artwork", "From cover"], ["solid", "Solid"], ["gradient", "Gradient"], ["spectrum", "Rainbow"]]} v={viz.colorMode} set={set("colorMode")} />
-						{viz.colorMode === "artwork" && (
-							<>
-								<ColorPoints points={viz.colorPoints} set={set("colorPoints")} />
-								<div>
-									<Pill looks={looks} pressed={false} onClick={() => update({ colorPoints: defaultViz().colorPoints })}>
-										Reset points
-									</Pill>
-								</div>
-							</>
-						)}
+					<Section title="Color" keys={SECTIONS.Color} {...p}>
+						<Choice looks={looks} {...p} k="colorMode" name="Colors" options={[["artwork", "From cover"], ["solid", "Solid"], ["gradient", "Gradient"], ["spectrum", "Rainbow"]]} />
+						{viz.colorMode === "artwork" && <ColorPoints looks={looks} points={viz.colorPoints} set={(colorPoints) => update({ colorPoints })} />}
 						{(viz.colorMode === "solid" || viz.colorMode === "gradient") && (
-						<div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-							{(["color1", "color2"] as const).slice(0, viz.colorMode === "solid" ? 1 : 2).map((k, i) => (
-								<label key={k} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-									<span style={{ ...text, color: "#fff", width: 92 }}>{i ? "Color 2" : "Color 1"}</span>
-									<input type="color" value={viz[k]} onChange={(e) => update({ [k]: e.target.value })}
-										style={{ width: 40, height: 28, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} />
-								</label>
-							))}
-						</div>
+							<div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+								{(["color1", "color2"] as const).slice(0, viz.colorMode === "solid" ? 1 : 2).map((k, i) => (
+									<label key={k} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+										<span style={label}>{viz.colorMode === "solid" ? "Color" : `Color ${i + 1}`}</span>
+										<input type="color" value={viz[k]} onChange={(e) => update({ [k]: e.target.value })}
+											style={{ width: 40, height: 28, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} />
+										<ResetOne viz={viz} k={k} update={update} />
+									</label>
+								))}
+							</div>
 						)}
 						<Row>
-							<Slider label="Opacity" min={0.1} max={1} step={0.05} v={viz.opacity} set={set("opacity")} />
-							<Slider label="Glow" min={0} max={40} unit=" px" v={viz.glow} set={set("glow")} />
+							<Slider {...p} k="opacity" name="Opacity" />
+							<Slider {...p} k="glow" name="Glow" unit=" px" />
 						</Row>
 					</Section>
 
-					<Section title="Motion">
+					<Section title="Motion" keys={SECTIONS.Motion} {...p}>
 						<Row>
-							<Slider label="Rotation" min={0} max={359} unit="°" v={viz.rotation} set={set("rotation")} />
-							<Slider label="Spin" min={-30} max={30} unit=" rpm" v={viz.spin} set={set("spin")} />
+							<Slider {...p} k="rotation" name="Rotation" unit="°" />
+							<Slider {...p} k="spin" name="Spin" unit=" rpm" />
 						</Row>
 						<Row>
-							<Slider label="Cover beat" min={0} max={1} step={0.05} v={viz.pulse} set={set("pulse")} />
-							<Slider label="Smoothing" min={0} max={1} step={0.05} v={viz.smoothing} set={set("smoothing")} />
+							<Slider {...p} k="pulse" name="Cover beat" />
+							<Slider {...p} k="smoothing" name="Smoothing" />
 						</Row>
 						<Row>
-							<Slider label="Rise" min={5} max={300} unit=" ms" v={viz.attack} set={set("attack")} />
-							<Slider label="Fall" min={20} max={1500} step={10} unit=" ms" v={viz.decay} set={set("decay")} />
-						</Row>
-					</Section>
-
-					<Section title="Response">
-						<Row>
-							<Slider label="Sensitivity" min={-12} max={40} unit=" dB" v={viz.sensitivity} set={set("sensitivity")} />
-							<Slider label="Range" min={20} max={90} unit=" dB" v={viz.range} set={set("range")} />
-						</Row>
-						<Row>
-							<Slider label="Lowest" min={20} max={500} step={5} unit=" Hz" v={viz.minFreq} set={set("minFreq")} />
-							<Slider label="Highest" min={1000} max={11000} step={100} unit=" Hz" v={viz.maxFreq} set={set("maxFreq")} />
-						</Row>
-						<Row>
-							<Slider label="Treble lift" min={0} max={6} step={0.5} unit=" dB/oct" v={viz.tilt} set={set("tilt")} />
-							<Slider label="Sync" min={-300} max={300} step={10} unit=" ms" v={viz.syncOffset} set={set("syncOffset")} />
+							<Slider {...p} k="attack" name="Rise" unit=" ms" />
+							<Slider {...p} k="decay" name="Fall" unit=" ms" />
 						</Row>
 					</Section>
 
-					<Section title="Performance">
-						<Choice looks={looks} label="Frame rate" options={[[30, "30"], [60, "60"], [120, "120"], [0, "Max"]]} v={viz.fps} set={set("fps")} />
+					<Section title="Response" keys={SECTIONS.Response} {...p}>
+						<Row>
+							<Slider {...p} k="sensitivity" name="Sensitivity" unit=" dB" />
+							<Slider {...p} k="range" name="Range" unit=" dB" />
+						</Row>
+						<Row>
+							<Slider {...p} k="minFreq" name="Lowest" unit=" Hz" />
+							<Slider {...p} k="maxFreq" name="Highest" unit=" Hz" />
+						</Row>
+						<Row>
+							<Slider {...p} k="tilt" name="Treble lift" unit=" dB/oct" />
+							<Slider {...p} k="syncOffset" name="Sync" unit=" ms" />
+						</Row>
 					</Section>
+
+					<Section title="Performance" keys={SECTIONS.Performance} {...p}>
+						<Choice looks={looks} {...p} k="fps" name="Frame rate" options={[[30, "30"], [60, "60"], [120, "120"], [0, "Max"]]} />
+					</Section>
+
+					<section style={{ marginTop: 28 }}>
+						<h3 style={heading}>Share</h3>
+						<Share viz={viz} update={update} />
+					</section>
+
+					<p style={{ ...small, marginTop: 24 }}>Tip: ↺ puts one setting back, double-clicking a slider does the same, and each section has its own reset. Click a value to type it.</p>
 				</div>
 			</div>
 		</div>
