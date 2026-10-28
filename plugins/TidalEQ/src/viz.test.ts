@@ -44,6 +44,13 @@ const auto = autoPoints(px, 2);
 assert(auto.every(([, y]) => y > 8 / 63), "no auto point on black");
 assert(auto.some(([x]) => x < 0.5) && auto.some(([x]) => x > 0.5), "one point on each colour");
 
+// Auto points come back in hue order (green stripe left, blue middle, red right → red, green, blue), up to 24
+const stripes = new Uint8ClampedArray(64 * 64 * 4);
+for (let i = 0; i < 64 * 64; i++) stripes.set(i % 64 < 21 ? [0, 200, 0, 255] : i % 64 < 42 ? [0, 0, 220, 255] : [220, 0, 0, 255], i * 4);
+const ordered = autoPoints(stripes, 3);
+assert(ordered[0][0] > 0.66 && ordered[1][0] < 0.33 && ordered[2][0] > 0.33 && ordered[2][0] < 0.66, `hue order: ${JSON.stringify(ordered)}`);
+assert.strictEqual(autoPoints(stripes, 24).length, 24, "24 points even when the cover has few colours");
+
 // Pasted settings: unknown keys dropped, bad values ignored, numbers clamped, points validated
 const pasted = sanitizeViz({ bars: 9999, style: "laser", glow: "lots", color1: "red", colorPoints: [[0.5, 2], ["x", 1]], evil: "<script>", opacity: 0.5 });
 assert.strictEqual(pasted.bars, 256);

@@ -122,8 +122,11 @@ const Row = ({ children }: { children: React.ReactNode }) => <div style={{ displ
 
 const coverSrc = () => document.querySelector<HTMLImageElement>("[data-test=new-now-playing] [class*=_artworkWrapper_] img")?.src ?? "";
 
-/** The current cover with draggable dots: each dot is where one colour is taken from. Click adds, double-click removes. */
-const ColorPoints = ({ looks, points, set }: { looks: Looks; points: [number, number][]; set: (p: [number, number][]) => void }) => {
+/**
+ * The current cover with a dot where each colour comes from. Auto picks them again from every new cover;
+ * moving, adding or removing a dot switches to manual, starting from the dots shown.
+ */
+const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; update: Update }) => {
 	const [src, setSrc] = React.useState(coverSrc);
 	const [pixels, setPixels] = React.useState<Uint8ClampedArray | null>(null);
 	const box = React.useRef<HTMLDivElement>(null);
@@ -138,7 +141,11 @@ const ColorPoints = ({ looks, points, set }: { looks: Looks; points: [number, nu
 		if (src) coverPixels(src).then((p) => live && setPixels(p));
 		return () => void (live = false);
 	}, [src]);
+	const auto = React.useMemo(() => (pixels ? autoPoints(pixels, viz.colorCount) : []), [pixels, viz.colorCount]);
+	const points = viz.autoColors ? auto : viz.colorPoints;
 	const colors = pixels ? sampleColors(pixels, points) : points.map(() => "#fff");
+	const manual = (colorPoints: [number, number][]) => update({ autoColors: false, colorPoints });
+	const dot = points.length > 12 ? 12 : 16;
 
 	const at = (e: React.PointerEvent | React.MouseEvent): [number, number] => {
 		const r = box.current!.getBoundingClientRect();
@@ -147,51 +154,65 @@ const ColorPoints = ({ looks, points, set }: { looks: Looks; points: [number, nu
 	};
 
 	return (
-		<div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-			<div
-				ref={box}
-				style={{ position: "relative", width: 180, height: 180, borderRadius: 4, overflow: "hidden", cursor: "crosshair", touchAction: "none", flexShrink: 0, background: "rgba(255,255,255,0.06)" }}
-				onPointerMove={(e) => drag.current !== null && set(points.map((p, i) => (i === drag.current ? at(e) : p)))}
-				onPointerUp={() => (drag.current = null)}
-				onClick={(e) => e.target === e.currentTarget.firstChild && points.length < MAX_COLOR_POINTS && set([...points, at(e)])}
-			>
-				{src && <img src={src} alt="" draggable={false} style={{ width: "100%", height: "100%", display: "block", userSelect: "none" }} />}
-				{points.map(([x, y], i) => (
-					<span
-						key={i}
-						title="Drag to move, double-click to remove"
-						onPointerDown={(e) => {
-							e.stopPropagation();
-							(e.currentTarget.parentElement as HTMLElement).setPointerCapture(e.pointerId);
-							drag.current = i;
-						}}
-						onDoubleClick={(e) => {
-							e.stopPropagation();
-							if (points.length > 1) set(points.filter((_, j) => j !== i));
-						}}
-						style={{
-							position: "absolute", left: `${x * 100}%`, top: `${y * 100}%`, width: 16, height: 16, margin: -8, borderRadius: 8,
-							background: colors[i], border: "2px solid #fff", boxShadow: "0 0 0 1px rgba(0,0,0,0.5)", cursor: "grab",
-						}}
-					/>
-				))}
-			</div>
-			<div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, flex: "1 1 200px" }}>
-				<p style={small}>
-					Each dot picks a colour from the cover; the ring blends them in order. Drag a dot to move it, click the cover to add one (up to {MAX_COLOR_POINTS}), double-click a dot to remove it. Dark areas are brightened so they still show.
-				</p>
-				<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-					{colors.map((c, i) => (
-						<span key={i} style={{ width: 28, height: 28, borderRadius: 6, background: c, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.25)" }} />
+		<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+			<Choice looks={looks} viz={viz} update={update} k="autoColors" name="Points" options={[[true, "Auto (every song)"], [false, "Manual"]]} />
+			{viz.autoColors && (
+				// In a row: a slider directly in this column would stretch vertically
+				<Row>
+					<Slider viz={viz} update={update} k="colorCount" name="Colours" />
+				</Row>
+			)}
+			<div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+				<div
+					ref={box}
+					style={{ position: "relative", width: 180, height: 180, borderRadius: 4, overflow: "hidden", cursor: "crosshair", touchAction: "none", flexShrink: 0, background: "rgba(255,255,255,0.06)" }}
+					onPointerMove={(e) => drag.current !== null && manual(points.map((p, i) => (i === drag.current ? at(e) : p)))}
+					onPointerUp={() => (drag.current = null)}
+					onClick={(e) => e.target === e.currentTarget.firstChild && points.length < MAX_COLOR_POINTS && manual([...points, at(e)])}
+				>
+					{src && <img src={src} alt="" draggable={false} style={{ width: "100%", height: "100%", display: "block", userSelect: "none" }} />}
+					{points.map(([x, y], i) => (
+						<span
+							key={i}
+							title="Drag to move, double-click to remove"
+							onPointerDown={(e) => {
+								e.stopPropagation();
+								(e.currentTarget.parentElement as HTMLElement).setPointerCapture(e.pointerId);
+								drag.current = i;
+							}}
+							onDoubleClick={(e) => {
+								e.stopPropagation();
+								if (points.length > 1) manual(points.filter((_, j) => j !== i));
+							}}
+							style={{
+								position: "absolute", left: `${x * 100}%`, top: `${y * 100}%`, width: dot, height: dot, margin: -dot / 2, borderRadius: dot,
+								background: colors[i], border: "2px solid #fff", boxShadow: "0 0 0 1px rgba(0,0,0,0.5)", cursor: "grab", boxSizing: "border-box",
+							}}
+						/>
 					))}
 				</div>
-				<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-					<Pill looks={looks} pressed={false} onClick={() => pixels && set(autoPoints(pixels, points.length))}>
-						Auto: most vivid colours
-					</Pill>
-					<Pill looks={looks} pressed={false} onClick={() => set(DEFAULTS.colorPoints)}>
-						Reset points
-					</Pill>
+				<div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, flex: "1 1 220px" }}>
+					<p style={small}>
+						{viz.autoColors
+							? "The colours are picked again from every new cover: the most vivid and different ones, in colour order. Move, add or remove a dot to choose them yourself."
+							: `Your own points, kept for every song. Drag a dot to move it, click the cover to add one (up to ${MAX_COLOR_POINTS}), double-click a dot to remove it.`}{" "}
+						Dark areas are brightened so they still show.
+					</p>
+					<div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+						{colors.map((c, i) => (
+							<span key={i} style={{ width: 20, height: 20, borderRadius: 4, background: c, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.25)" }} />
+						))}
+					</div>
+					{!viz.autoColors && (
+						<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+							<Pill looks={looks} pressed={false} onClick={() => pixels && manual(autoPoints(pixels, points.length))}>
+								Pick from this cover
+							</Pill>
+							<Pill looks={looks} pressed={false} onClick={() => manual(DEFAULTS.colorPoints)}>
+								Reset points
+							</Pill>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>
@@ -202,10 +223,11 @@ const ColorPoints = ({ looks, points, set }: { looks: Looks; points: [number, nu
 const Presets = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; update: Update }) => {
 	const [saved, setSaved] = React.useState(() => [...(settings.vizPresets ?? [])]);
 	const [naming, setNaming] = React.useState<string | null>(null);
-	// A preset changes the look only: on/off and the colour points stay
+	// A preset changes the look only: on/off and where the colours come from stay
 	const apply = (p: Partial<VizSettings>) => {
 		const now = vizSettings();
-		update({ ...sanitizeViz({ ...DEFAULTS, ...p }), enabled: now.enabled, colorPoints: now.colorPoints });
+		const { enabled, colorPoints, autoColors, colorCount } = now;
+		update({ ...sanitizeViz({ ...DEFAULTS, ...p }), enabled, colorPoints, autoColors, colorCount });
 	};
 	const store = (list: typeof saved) => {
 		setSaved(list);
@@ -214,7 +236,7 @@ const Presets = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; updat
 	const save = () => {
 		const name = naming?.trim();
 		if (!name) return setNaming(null);
-		const { enabled: _, colorPoints: __, ...look } = viz;
+		const { enabled: _, colorPoints: __, autoColors: ___, colorCount: ____, ...look } = viz;
 		store([...saved.filter((p) => p.name !== name), { name, viz: look }]);
 		setNaming(null);
 	};
@@ -291,7 +313,7 @@ const Share = ({ viz, update }: { viz: VizSettings; update: Update }) => {
 const SECTIONS: Record<string, Key[]> = {
 	Look: ["style", "shape", "placement", "mirror", "roundCaps", "peaks"],
 	Size: ["bars", "width", "length", "gap"],
-	Color: ["colorMode", "color1", "color2", "colorPoints", "opacity", "glow"],
+	Color: ["colorMode", "color1", "color2", "colorPoints", "autoColors", "colorCount", "opacity", "glow"],
 	Motion: ["rotation", "spin", "pulse", "smoothing", "attack", "decay"],
 	Response: ["sensitivity", "range", "minFreq", "maxFreq", "tilt", "syncOffset"],
 	Performance: ["fps"],
@@ -371,7 +393,7 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 
 					<Section title="Color" keys={SECTIONS.Color} {...p}>
 						<Choice looks={looks} {...p} k="colorMode" name="Colors" options={[["artwork", "From cover"], ["solid", "Solid"], ["gradient", "Gradient"], ["spectrum", "Rainbow"]]} />
-						{viz.colorMode === "artwork" && <ColorPoints looks={looks} points={viz.colorPoints} set={(colorPoints) => update({ colorPoints })} />}
+						{viz.colorMode === "artwork" && <ColorPoints looks={looks} viz={viz} update={update} />}
 						{(viz.colorMode === "solid" || viz.colorMode === "gradient") && (
 							<div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
 								{(["color1", "color2"] as const).slice(0, viz.colorMode === "solid" ? 1 : 2).map((k, i) => (

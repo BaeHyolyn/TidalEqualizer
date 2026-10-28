@@ -24,7 +24,9 @@ export type VizSettings = {
 	colorMode: VizColorMode;
 	color1: string;
 	color2: string;
-	colorPoints: [number, number][]; // where "From cover" picks its colours, as 0..1 positions on the cover
+	colorPoints: [number, number][]; // where "From cover" picks its colours, as 0..1 positions on the cover (manual mode)
+	autoColors: boolean; // pick the colour points again from every new cover
+	colorCount: number; // how many colours auto mode picks
 	opacity: number; // 0..1
 	glow: number; // px
 	sensitivity: number; // dB of headroom: lower = taller bars
@@ -63,6 +65,8 @@ export const defaultViz = (): VizSettings => ({
 		[0.75, 0.75],
 		[0.25, 0.75],
 	],
+	autoColors: true,
+	colorCount: 24,
 	opacity: 0.85,
 	glow: 8,
 	sensitivity: 12,
@@ -181,7 +185,7 @@ export const smoothBars = (
 	return out;
 };
 
-export const MAX_COLOR_POINTS = 8;
+export const MAX_COLOR_POINTS = 24;
 const GRID = 64; // the cover is sampled from a 64x64 copy
 
 /** RGB 0..255 → HSL 0..1, and back. */
@@ -278,6 +282,12 @@ export const autoPoints = (pixels: Uint8ClampedArray, count = 4): [number, numbe
 		if (best) picked.push(best);
 		else minApart /= 2; // a one-colour cover: accept closer colours
 	}
+	// In hue order, so the ring flows from one colour to the next instead of jumping around
+	const hue = (c: (typeof cells)[number]) => {
+		const [h, sat] = toHsl(...c.rgb);
+		return sat < 0.12 ? 2 + toHsl(...c.rgb)[2] : h; // greys after the colours, dark to light
+	};
+	picked.sort((a, b) => hue(a) - hue(b));
 	return picked.map((c) => [Math.round((c.x / (GRID - 1)) * 1000) / 1000, Math.round((c.y / (GRID - 1)) * 1000) / 1000]);
 };
 
@@ -300,6 +310,7 @@ export const VIZ_RANGES: Partial<Record<keyof VizSettings, [min: number, max: nu
 	minFreq: [20, 500, 5],
 	maxFreq: [1000, 11000, 100],
 	tilt: [0, 6, 0.5],
+	colorCount: [2, MAX_COLOR_POINTS, 1],
 	syncOffset: [-300, 300, 10],
 };
 const CHOICES: Partial<Record<keyof VizSettings, readonly unknown[]>> = {

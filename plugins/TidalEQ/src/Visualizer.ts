@@ -4,7 +4,7 @@ import { MediaItem, PlayState } from "@luna/lib";
 import { responseDb } from "./eq";
 import { getTime, readPcm } from "./player.native";
 import { settings, vizSettings } from "./Settings";
-import { analyze, bandEdges, bandLevels, coverPixels, PCM_RATE, sampleColors, smoothBars, type VizSettings } from "./viz";
+import { analyze, autoPoints, bandEdges, bandLevels, coverPixels, PCM_RATE, sampleColors, smoothBars, type VizSettings } from "./viz";
 
 // Draws the spectrum around TIDAL's now-playing cover on one canvas, in its own animation loop (never through React).
 // Samples come from the silent decoder mpv (readPcm); the position from the playing mpv, extrapolated between polls.
@@ -304,9 +304,14 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 
 		// Colours: one paint for the whole frame keeps it to a single draw call
 		const art = artColor ?? v.color1;
-		// Colours from the chosen points on the cover; re-sampled only when the cover or the points change
-		const key = pixels ? JSON.stringify(v.colorPoints) : "";
-		if (key !== pointsKey) (pointsKey = key), (pointColors = pixels && v.colorPoints?.length ? sampleColors(pixels, v.colorPoints) : []);
+		// Colours from points on the cover: picked automatically from each new cover, or the user's own points.
+		// Worked out only when the cover, the mode or the points change, not every frame.
+		const key = pixels ? `${coverSrc}|${v.autoColors ? `auto${v.colorCount}` : JSON.stringify(v.colorPoints)}` : "";
+		if (key !== pointsKey) {
+			pointsKey = key;
+			const points = !pixels ? [] : v.autoColors ? autoPoints(pixels, v.colorCount) : v.colorPoints ?? [];
+			pointColors = pixels && points.length ? sampleColors(pixels, points) : [];
+		}
 		let paint: string | CanvasGradient = v.colorMode === "artwork" ? art : v.color1;
 		if (v.colorMode === "gradient" || v.colorMode === "spectrum" || v.colorMode === "artwork") {
 			const g = ctx.createConicGradient(Math.PI / 2 + turn * 2 * Math.PI, cx, cy);
