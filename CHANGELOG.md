@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.2
 
 ### Improved
 - The visualizer is now part of the cover itself: it lives inside the cover's box, so the cover and the ring move, tilt and beat as one piece and can't drift apart.
