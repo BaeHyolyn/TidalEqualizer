@@ -96,7 +96,8 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 		if (!el) return;
 		const onWheel = (e: WheelEvent) => {
 			const { bands, selected, onBand } = latest.current;
-			if (selected === null) return;
+			// Only over the selected dot: elsewhere the wheel scrolls the page as usual
+			if (selected === null || (e.target as Element).getAttribute?.("data-band") !== String(selected)) return;
 			e.preventDefault();
 			const b = bands[selected];
 			const q = Math.min(10, Math.max(0.1, b.q * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
@@ -124,7 +125,7 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 			onPointerUp={() => (drag.current = null)}
 			onPointerLeave={() => (drag.current = null)}
 			onPointerDown={(e) => e.target === svg.current && onSelect(null)}
-			role="img"
+			role="group"
 			aria-label="Equalizer frequency response"
 		>
 			<defs>
@@ -179,6 +180,7 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 							cx={cx}
 							cy={cy}
 							r={7}
+							data-band={i}
 							fill={selected === i ? C.selected : "#ffffff"}
 							stroke="rgba(0,0,0,0.5)"
 							strokeWidth={1.5}

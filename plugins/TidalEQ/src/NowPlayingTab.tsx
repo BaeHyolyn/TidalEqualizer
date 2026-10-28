@@ -56,7 +56,7 @@ export const EqPanel = ({ looks }: { looks: Looks }) => {
 			<div style={{ opacity: eq.enabled ? 1 : 0.4, transition: "opacity .2s" }}>
 				<EqGraph bands={eq.bands} macros={eq.macros} selected={selected} onSelect={setSelected} onBand={setBand} />
 				{selected !== null && eq.bands[selected] ? (
-					<BandEditor band={eq.bands[selected]} index={selected} onChange={(b) => setBand(selected, b)} />
+					<BandEditor band={eq.bands[selected]} onChange={(b) => setBand(selected, b)} />
 				) : (
 					<p style={{ ...text, fontSize: 12, marginTop: 10 }}>Drag a dot to shape the sound. Scroll on it to change its width, double-click to reset.</p>
 				)}
@@ -145,7 +145,17 @@ export const addPanelTab = (unloads: Set<LunaUnload>, id: string, label: string,
 		if (host.parentElement !== panel.parentElement) panel.after(host);
 	};
 
+	let opening = false; // a second click while TIDAL is still opening the panel would mount it twice
 	const open = async () => {
+		if (opening) return;
+		opening = true;
+		try {
+			await doOpen();
+		} finally {
+			opening = false;
+		}
+	};
+	const doOpen = async () => {
 		const creditsButton = credits();
 		if (!creditsButton) return;
 		// Credits may already be open underneath another of our tabs; only ask TIDAL to open it when it isn't

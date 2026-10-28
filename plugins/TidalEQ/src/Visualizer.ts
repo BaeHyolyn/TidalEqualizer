@@ -22,12 +22,28 @@ let pcmBytes = 0;
 let pcmDone = true;
 let pcmLeftover = new Uint8Array(0);
 
-/** Called on every track load: forget the old samples and read the new ones as they're decoded. */
 // While the Visualizer tab is open and the music is paused, animate a made-up spectrum so changes can still be seen
 let preview = false;
 export const setPreview = (on: boolean) => (preview = on);
 
+let pcmGeneration = 0; // bumps on every reset, so a read still in flight for the previous track is dropped
+let pulling = false;
+
+// Playing position: polled from mpv a few times a second, extrapolated in between
+let polled = { time: 0, at: 0 };
+const pollTime = async () => {
+	const time = await getTime();
+	if (time !== null) polled = { time, at: performance.now() };
+};
+const position = (offsetMs: number) => {
+	const t = PlayState.playing ? polled.time + (performance.now() - polled.at) / 1000 : polled.time;
+	return t - offsetMs / 1000;
+};
+
+/** Called on every track load: forget the old samples and read the new ones as they're decoded. */
 export const resetPcm = (decoding: boolean) => {
+	pcmGeneration++;
+	polled = { time: 0, at: performance.now() }; // don't analyse the old track's position until the first poll
 	pcmLength = 0;
 	pcmBytes = 0;
 	pcmLeftover = new Uint8Array(0);
@@ -35,8 +51,17 @@ export const resetPcm = (decoding: boolean) => {
 };
 
 const pullPcm = async () => {
-	if (pcmDone) return;
-	const { data, done } = await readPcm(pcmBytes);
+	if (pcmDone || pulling) return; // one read at a time, or two could read the same bytes
+	pulling = true;
+	const mine = pcmGeneration;
+	let read: Awaited<ReturnType<typeof readPcm>>;
+	try {
+		read = await readPcm(pcmBytes);
+	} finally {
+		pulling = false;
+	}
+	const { data, done } = read;
+	if (mine !== pcmGeneration) return;
 	if (data?.length) {
 		pcmBytes += data.length;
 		// Samples are 4 bytes; a read can end mid-sample, so carry the remainder to the next read
@@ -57,19 +82,9 @@ const pullPcm = async () => {
 	if (done && !data?.length) pcmDone = true;
 };
 
-// Playing position: polled from mpv a few times a second, extrapolated in between
-let polled = { time: 0, at: 0 };
-const pollTime = async () => {
-	const time = await getTime();
-	if (time !== null) polled = { time, at: performance.now() };
-};
-const position = (offsetMs: number) => {
-	const t = PlayState.playing ? polled.time + (performance.now() - polled.at) / 1000 : polled.time;
-	return t - offsetMs / 1000;
-};
 
 /**
- * TIDAL's own accent colour for the album, lightened: TIDAL tints the now-playing background with the same colour,
+ * TIDAL's own accent color for the album, lightened: TIDAL tints the now-playing background with the same color,
  * so the raw one would vanish into it.
  */
 const albumColor = async (): Promise<string | null> => {
@@ -80,7 +95,7 @@ const albumColor = async (): Promise<string | null> => {
 	return `rgb(${mix(1)},${mix(3)},${mix(5)})`;
 };
 
-/** Rough brightness of an rgb()/#hex colour, 0..255. */
+/** Rough brightness of an rgb()/#hex color, 0..255. */
 const lum = (c: string) => {
 	const n = c.startsWith("#") ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : (c.match(/\d+/g) ?? []).map(Number);
 	return (n[0] ?? 0) * 0.3 + (n[1] ?? 0) * 0.59 + (n[2] ?? 0) * 0.11;
@@ -117,9 +132,13 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	let cover: HTMLElement | null = null;
 	let coverSrc = "";
 	let artColor: string | null = null;
-	let pixels: Uint8ClampedArray | null = null; // the current cover, for the colour points
+	let pixels: Uint8ClampedArray | null = null; // the current cover, for the color points
 	let pointColors: string[] = [];
 	let pointsKey = "";
+	let pointsSeen: VizSettings["colorPoints"] | null = null; // the manual points last sampled (same array until edited)
+	// TIDAL's tab bar, player bar and side panel, so the drawing stays clear of them
+	let ui: { panel?: DOMRect; tabs?: DOMRect; player?: DOMRect } = {};
+	let uiAt = 0;
 	const restoreCover = () => {
 		if (cover) cover.style.scale = "";
 		canvas.style.scale = "";
@@ -146,8 +165,12 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		eqKey = "";
 	};
 
-	// What the equalizer adds at each band's centre, so the bars show what you hear (recomputed only when it changes)
-	const refreshEq = () => {
+	// What the equalizer adds at each band's centre, so the bars show what you hear (recomputed only when it changes,
+	// checked a few times a second rather than every frame)
+	let eqChecked = 0;
+	const refreshEq = (now: number) => {
+		if (now - eqChecked < 300 && eqKey) return;
+		eqChecked = now;
 		const k = settings.enabled ? JSON.stringify([settings.bands, settings.macros, settings.preamp, key]) : key;
 		if (k === eqKey) return;
 		eqKey = k;
@@ -171,13 +194,19 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		if (v.fps > 0 && now - last < 1000 / v.fps - 2) return;
 		const dt = Math.min(100, now - last);
 		last = now;
+		// Off: don't touch the page at all
+		if (!v.enabled || !settings.enabled) {
+			if (canvas.width) canvas.width = 0;
+			restoreCover();
+			return;
+		}
 
 		const img = document.querySelector<HTMLElement>(COVER);
 		// The cover's flat box: layout size around its on-screen centre, so a 3D tilt or our beat scale doesn't inflate it
 		const box = img?.getBoundingClientRect();
 		const rect = box && new DOMRect(box.left + box.width / 2 - img!.offsetWidth / 2, box.top + box.height / 2 - img!.offsetHeight / 2, img!.offsetWidth, img!.offsetHeight);
 		const visible = !!rect && rect.width > 40 && img!.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) !== false;
-		if (!v.enabled || !settings.enabled || !visible) {
+		if (!visible) {
 			if (canvas.width) canvas.width = 0;
 			restoreCover();
 			return;
@@ -187,15 +216,19 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const wrapper = img!.closest<HTMLElement>("[class*=_artworkWrapper_]")!;
 		const view = wrapper.parentElement!;
 		if (canvas.previousElementSibling !== wrapper) {
-			if (getComputedStyle(view).position === "static") view.style.position = "relative";
+			if (getComputedStyle(view).position === "static") {
+				view.style.position = "relative";
+				unloads.add(() => (view.style.position = ""));
+			}
 			wrapper.after(canvas);
 		}
 		if (coverImageSrc(img) !== coverSrc) {
 			coverSrc = coverImageSrc(img);
-			albumColor().then((c) => (artColor = c)).catch(() => (artColor = null));
+			const src = coverSrc;
+			// Both lookups are async: only keep the answer if the cover hasn't changed again meanwhile
+			albumColor().then((c) => src === coverSrc && (artColor = c)).catch(() => src === coverSrc && (artColor = null));
 			pixels = null;
 			pointsKey = "";
-			const src = coverSrc;
 			coverPixels(src).then((p) => src === coverSrc && (pixels = p));
 		}
 
@@ -204,7 +237,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 
 		const bands = Math.max(4, Math.round(v.mirror ? v.bars / 2 : v.bars));
 		rebuild(v, bands);
-		refreshEq();
+		refreshEq(now);
 
 		// Spectrum at the playing position → 0..1 per band
 		const spec = analyze(pcm, pcmLength, position(v.syncOffset) * PCM_RATE);
@@ -251,9 +284,16 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		// Stay clear of TIDAL's own UI: an open side panel (Lyrics, Credits, our tabs), the tab bar above and the player below
 		const left = rect.left - margin;
 		const top = rect.top - margin;
-		const panel = document.querySelector("[class*=_panelWrapperActive_]")?.getBoundingClientRect();
-		const tabs = document.querySelector("[data-test=new-now-playing] [class*=_contentButtons_]")?.getBoundingClientRect();
-		const player = document.querySelector("[data-test=footer-player]")?.getBoundingClientRect();
+		// (looked up a few times a second, not every frame)
+		if (now - uiAt > 250) {
+			uiAt = now;
+			ui = {
+				panel: document.querySelector("[class*=_panelWrapperActive_]")?.getBoundingClientRect(),
+				tabs: document.querySelector("[data-test=new-now-playing] [class*=_contentButtons_]")?.getBoundingClientRect(),
+				player: document.querySelector("[data-test=footer-player]")?.getBoundingClientRect(),
+			};
+		}
+		const { panel, tabs, player } = ui;
 		const x1 = panel && panel.left > rect.right - 1 ? panel.left - 12 - left : W;
 		const y0 = tabs?.height ? tabs.bottom + 4 - top : 0;
 		const y1 = player?.height ? player.top - 4 - top : H;
@@ -276,6 +316,14 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const turn = v.rotation / 360 + (v.spin * now) / 60000;
 
 		// Point on the outline and its outward direction, for a fraction 0..1 starting at the bottom centre, clockwise on screen
+		const legs: [number, number, number, number, number, number, number][] = [
+			// length, start x, start y, step x, step y, normal x, normal y
+			[hw, cx, cy + hh, -1, 0, 0, 1],
+			[2 * hh, cx - hw, cy + hh, 0, -1, -1, 0],
+			[2 * hw, cx - hw, cy - hh, 1, 0, 0, -1],
+			[2 * hh, cx + hw, cy - hh, 0, 1, 1, 0],
+			[hw, cx + hw, cy + hh, -1, 0, 0, 1],
+		];
 		const at = (f: number): [number, number, number, number] => {
 			f = ((f % 1) + 1) % 1;
 			if (v.shape === "circle") {
@@ -283,35 +331,28 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 				return [cx + Math.cos(a) * radius, cy + Math.sin(a) * radius, Math.cos(a), Math.sin(a)];
 			}
 			let s = f * perimeter;
-			const legs: [number, number, number, number, number, number, number][] = [
-				// length, start x, start y, step x, step y, normal x, normal y
-				[hw, cx, cy + hh, -1, 0, 0, 1],
-				[2 * hh, cx - hw, cy + hh, 0, -1, -1, 0],
-				[2 * hw, cx - hw, cy - hh, 1, 0, 0, -1],
-				[2 * hh, cx + hw, cy - hh, 0, 1, 1, 0],
-				[hw, cx + hw, cy + hh, -1, 0, 0, 1],
-			];
 			for (const [len, x, y, dx, dy, nx, ny] of legs) {
 				if (s <= len) return [x + dx * s, y + dy * s, nx, ny];
 				s -= len;
 			}
 			return [cx, cy + hh, 0, 1];
 		};
-		const valueAt = (i: number) => {
-			const b = v.mirror ? (i < bands ? i : n - 1 - i) : i;
-			return [shown[b], peaks[b]];
-		};
+		// Bar i of the ring → its band (mirrored: both halves count up from the bottom)
+		const bandOf = (i: number) => (v.mirror ? (i < bands ? i : n - 1 - i) : i);
+		const valueAt = (i: number) => shown[bandOf(i)];
+		const peakAt = (i: number) => peaks[bandOf(i)];
 		// Where a bar of `len` px starts and ends, depending on placement
 		const span = (len: number): [number, number] =>
 			v.placement === "outside" ? [0, len] : v.placement === "inside" ? [0, -len] : [-len / 2, len / 2];
 
-		// Colours: one paint for the whole frame keeps it to a single draw call
+		// Colors: one paint for the whole frame keeps it to a single draw call
 		const art = artColor ?? v.color1;
-		// Colours from points on the cover: picked automatically from each new cover, or the user's own points.
+		// Colors from points on the cover: picked automatically from each new cover, or the user's own points.
 		// Worked out only when the cover, the mode or the points change, not every frame.
-		const key = pixels ? `${coverSrc}|${v.autoColors ? `auto${v.colorCount}` : JSON.stringify(v.colorPoints)}` : "";
-		if (key !== pointsKey) {
+		const key = pixels ? `${coverSrc}|${v.autoColors}|${v.colorCount}` : "";
+		if (key !== pointsKey || (!v.autoColors && v.colorPoints !== pointsSeen)) {
 			pointsKey = key;
+			pointsSeen = v.colorPoints;
 			const points = !pixels ? [] : v.autoColors ? autoPoints(pixels, v.colorCount) : v.colorPoints ?? [];
 			pointColors = pixels && points.length ? sampleColors(pixels, points) : [];
 		}
@@ -327,13 +368,13 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 								v.mirror ? [...pointColors, ...pointColors.slice(0, -1).reverse()] : [...pointColors, pointColors[0]]
 							: [art, v.color1, art]
 						: [v.color1, v.color2, v.color1];
-			if (stops.length < 2) stops.push(stops[0]); // a single colour point
+			if (stops.length < 2) stops.push(stops[0]); // a single color point
 			stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
 			paint = g;
 		}
 		ctx.globalAlpha = v.opacity;
 		ctx.shadowBlur = v.glow;
-		// Glow in the lightest colour in use: a dark glow just looks like a smudge
+		// Glow in the lightest color in use: a dark glow just looks like a smudge
 		const lightest = (cs: string[]) => cs.reduce((a, c) => (lum(c) > lum(a) ? c : a), cs[0]);
 		ctx.shadowColor =
 			v.colorMode === "solid" ? v.color1
@@ -350,7 +391,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			const pts: [number, number][] = [];
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at(i / n + turn);
-				const [, end] = span(2 + valueAt(i)[0] * v.length);
+				const [, end] = span(2 + valueAt(i) * v.length);
 				pts.push([x + nx * end, y + ny * end]);
 			}
 			// Smooth closed curve through the tips, via midpoints
@@ -375,7 +416,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		} else if (v.style === "dots") {
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
-				const [, end] = span(2 + valueAt(i)[0] * v.length);
+				const [, end] = span(2 + valueAt(i) * v.length);
 				const r = thick / 2;
 				ctx.moveTo(x + nx * end + r, y + ny * end);
 				ctx.arc(x + nx * end, y + ny * end, r, 0, 2 * Math.PI);
@@ -384,8 +425,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		} else {
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
-				if (valueAt(i)[0] < 0.02) continue; // silent bars would only draw a dotted outline
-				const [a, b] = span(1 + valueAt(i)[0] * v.length);
+				if (valueAt(i) < 0.02) continue; // silent bars would only draw a dotted outline
+				const [a, b] = span(1 + valueAt(i) * v.length);
 				ctx.moveTo(x + nx * a, y + ny * a);
 				ctx.lineTo(x + nx * b, y + ny * b);
 			}
@@ -398,7 +439,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			ctx.shadowBlur = 0;
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
-				const [, end] = span(3 + valueAt(i)[1] * v.length);
+				const [, end] = span(3 + peakAt(i) * v.length);
 				ctx.moveTo(x + nx * end, y + ny * end);
 				ctx.lineTo(x + nx * (end + 2 * Math.sign(end || 1)), y + ny * (end + 2 * Math.sign(end || 1)));
 			}

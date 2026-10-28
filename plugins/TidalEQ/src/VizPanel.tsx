@@ -34,13 +34,13 @@ const small: React.CSSProperties = { ...text, fontSize: 12 };
 const linkButton: React.CSSProperties = { ...small, background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" };
 
 /** Shown only when the value differs from its default; puts that one setting back. */
-const ResetOne = ({ viz, k, update }: { viz: VizSettings; k: Key; update: Update }) => {
+const ResetOne = ({ viz, k, name, update }: { viz: VizSettings; k: Key; name: string; update: Update }) => {
 	const off = same(viz[k], DEFAULTS[k]);
 	return (
 		<button
 			type="button"
 			title={`Back to default (${show(DEFAULTS[k])})`}
-			aria-label={`Reset ${k} to default`}
+			aria-label={`Reset ${name} to default`}
 			onClick={() => update({ [k]: DEFAULTS[k] })}
 			style={{ ...small, width: 20, flexShrink: 0, background: "none", border: "none", padding: 0, cursor: off ? "default" : "pointer", color: "#fff", visibility: off ? "hidden" : "visible" }}
 		>
@@ -83,7 +83,7 @@ const Slider = ({ viz, k, name, unit = "", update }: { viz: VizSettings; k: Key;
 					style={{ ...small, color: "#fff", width: 76, textAlign: "right", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 4 }}
 				/>
 			)}
-			<ResetOne viz={viz} k={k} update={update} />
+			<ResetOne viz={viz} k={k} name={name} update={update} />
 		</div>
 	);
 };
@@ -98,7 +98,7 @@ const Choice = <K extends Key>({ looks, viz, k, name, options, update }: { looks
 				</Pill>
 			))}
 		</div>
-		<ResetOne viz={viz} k={k} update={update} />
+		<ResetOne viz={viz} k={k} name={name} update={update} />
 	</div>
 );
 
@@ -123,7 +123,7 @@ const Row = ({ children }: { children: React.ReactNode }) => <div style={{ displ
 const coverSrc = () => coverImageSrc(document.querySelector(COVER));
 
 /**
- * The current cover with a dot where each colour comes from. Auto picks them again from every new cover;
+ * The current cover with a dot where each color comes from. Auto picks them again from every new cover;
  * moving, adding or removing a dot switches to manual, starting from the dots shown.
  */
 const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; update: Update }) => {
@@ -159,7 +159,7 @@ const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; u
 			{viz.autoColors && (
 				// In a row: a slider directly in this column would stretch vertically
 				<Row>
-					<Slider viz={viz} update={update} k="colorCount" name="Colours" />
+					<Slider viz={viz} update={update} k="colorCount" name="Colors" />
 				</Row>
 			)}
 			<div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -168,7 +168,8 @@ const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; u
 					style={{ position: "relative", width: 180, height: 180, borderRadius: 4, overflow: "hidden", cursor: "crosshair", touchAction: "none", flexShrink: 0, background: "rgba(255,255,255,0.06)" }}
 					onPointerMove={(e) => drag.current !== null && manual(points.map((p, i) => (i === drag.current ? at(e) : p)))}
 					onPointerUp={() => (drag.current = null)}
-					onClick={(e) => e.target === e.currentTarget.firstChild && points.length < MAX_COLOR_POINTS && manual([...points, at(e)])}
+					// On the cover (or the empty box when there's no cover), not on a dot
+					onClick={(e) => (e.target === e.currentTarget || e.target === e.currentTarget.querySelector("img")) && points.length < MAX_COLOR_POINTS && manual([...points, at(e)])}
 				>
 					{src && <img src={src} alt="" draggable={false} style={{ width: "100%", height: "100%", display: "block", userSelect: "none" }} />}
 					{points.map(([x, y], i) => (
@@ -194,7 +195,7 @@ const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; u
 				<div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, flex: "1 1 220px" }}>
 					<p style={small}>
 						{viz.autoColors
-							? "The colours are picked again from every new cover: the most vivid and different ones, in colour order. Move, add or remove a dot to choose them yourself."
+							? "The colors are picked again from every new cover: the most vivid and different ones, in color order. Move, add or remove a dot to choose them yourself."
 							: `Your own points, kept for every song. Drag a dot to move it, click the cover to add one (up to ${MAX_COLOR_POINTS}), double-click a dot to remove it.`}{" "}
 						Dark areas are brightened so they still show.
 					</p>
@@ -223,7 +224,7 @@ const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; u
 const Presets = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; update: Update }) => {
 	const [saved, setSaved] = React.useState(() => [...(settings.vizPresets ?? [])]);
 	const [naming, setNaming] = React.useState<string | null>(null);
-	// A preset changes the look only: on/off and where the colours come from stay
+	// A preset changes the look only: on/off and where the colors come from stay
 	const apply = (p: Partial<VizSettings>) => {
 		const now = vizSettings();
 		const { enabled, colorPoints, autoColors, colorCount } = now;
@@ -323,13 +324,14 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 	const [viz, update] = useViz();
 	const [confirmReset, setConfirmReset] = React.useState(false);
 	const [playing, setPlaying] = React.useState(PlayState.playing);
+	const [eqOn, setEqOn] = React.useState(settings.enabled);
 	const onOff: [boolean, string][] = [[true, "On"], [false, "Off"]];
 	const p = { viz, update };
 
 	// Animate a preview while this tab is open and the music is paused
 	React.useEffect(() => {
 		setPreview(true);
-		const t = setInterval(() => setPlaying(PlayState.playing), 500);
+		const t = setInterval(() => (setPlaying(PlayState.playing), setEqOn(settings.enabled)), 500);
 		return () => {
 			setPreview(false);
 			clearInterval(t);
@@ -343,7 +345,7 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 			<div style={{ margin: "auto 0", paddingBottom: 48 }}>
 				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
 					<p style={text}>
-						{!settings.enabled
+						{!eqOn
 							? "Turn the equalizer on: the visualizer reads the audio mpv plays."
 							: playing
 								? "Spectrum around the cover, after your equalizer."
@@ -401,7 +403,7 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 										<span style={label}>{viz.colorMode === "solid" ? "Color" : `Color ${i + 1}`}</span>
 										<input type="color" value={viz[k]} onChange={(e) => update({ [k]: e.target.value })}
 											style={{ width: 40, height: 28, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} />
-										<ResetOne viz={viz} k={k} update={update} />
+										<ResetOne viz={viz} k={k} name={viz.colorMode === "solid" ? "Color" : `Color ${i + 1}`} update={update} />
 									</label>
 								))}
 							</div>

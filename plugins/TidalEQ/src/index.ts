@@ -3,7 +3,9 @@ import { ipcRenderer, MediaItem, PlayState, redux, safeInterval } from "@luna/li
 
 import { buildChain } from "./eq";
 import { addPanelTab, EqPanel } from "./NowPlayingTab";
-import { getTime, loadTrack, seek, setChain, setPaused, setVolume, startAnalysis, startPlayer, stopAnalysis, stopPlayer, stopTrack } from "./player.native";
+import {
+	getTime, isAlive, loadTrack, seek, setChain, setPaused, setVolume, startAnalysis, startPlayer, stopAnalysis, stopPlayer, stopTrack, trackFailed,
+} from "./player.native";
 import { setEqChangeHandler, settings, vizSettings } from "./Settings";
 import { resetPcm, startVisualizer } from "./Visualizer";
 import { VizPanel } from "./VizPanel";
@@ -28,6 +30,9 @@ let busy = false;
 let holdUntil = 0;
 let backSeekSince = 0;
 let analyzedId: MediaItem["id"] | null = null; // track the visualizer has samples for
+let tidalPlaysId: MediaItem["id"] | null = null; // a track mpv couldn't get: TIDAL plays it itself, no retry loop
+let generation = 0; // bumps on every start/stop, so a slow start that was overtaken gives up
+let starting: Promise<void> | null = null;
 
 const tidalVolume = () => redux.store.getState().playbackControls.volume ?? 100;
 // TIDAL reports its position only every ~300 ms; fill the gaps with elapsed time so mpv isn't judged against a stale value
@@ -49,7 +54,17 @@ const sync = async () => {
 	if (!running || busy || performance.now() < holdUntil) return;
 	busy = true;
 	try {
+		// mpv crashed or was closed: hand the sound back to TIDAL instead of staying muted
+		if (!(await isAlive())) {
+			trace.msg.err("mpv stopped, so TIDAL is playing normally again. Turn the equalizer off and on to retry.");
+			await stop();
+			return;
+		}
 		const media = await MediaItem.fromPlaybackContext();
+		if (media && media.id === tidalPlaysId) {
+			setOriginalVolume(tidalVolume());
+			return;
+		}
 		if (!media || media.contentType !== "track") {
 			// mpv only does audio: let TIDAL play videos itself
 			if (loadedId !== null) await stopTrack();
@@ -61,8 +76,8 @@ const sync = async () => {
 
 		if (media.id !== loadedId) {
 			const quality = PlayState.playbackContext?.actualAudioQuality;
-			const info = await media.playbackInfo(quality);
-			if (!info) return;
+			const info = await media.playbackInfo(quality).catch(() => undefined);
+			if (!info) return letTidalPlay(media.id, "Couldn't get this track for the equalizer");
 			await loadTrack(info, tidalPosition(), !PlayState.playing);
 			loadedId = media.id;
 			loadedAt = performance.now();
@@ -70,6 +85,9 @@ const sync = async () => {
 			lastPaused = !PlayState.playing;
 			return;
 		}
+
+		// The download failed (offline, region...): let TIDAL play this track rather than leave it silent
+		if (performance.now() - loadedAt > SETTLE_S * 1000 && (await trackFailed())) return letTidalPlay(media.id, "Couldn't load this track for the equalizer");
 
 		// The visualizer decodes the track separately; (re)start it when turned on or after a track change
 		const wantAnalysis = vizSettings().enabled;
@@ -122,23 +140,37 @@ const sync = async () => {
 	}
 };
 
-const start = async () => {
-	if (!settings.enabled) return;
+/** This track plays through TIDAL's own player (no equalizer) until the next track. */
+const letTidalPlay = async (id: MediaItem["id"], why: string) => {
+	trace.msg.warn(`${why}: TIDAL plays it without the equalizer.`);
+	tidalPlaysId = loadedId = id;
+	analyzedId = null;
+	await stopTrack().catch(() => {});
+	setOriginalVolume(tidalVolume());
+};
+
+// One start at a time: EQ changes during a slow start would otherwise launch more mpv processes
+const start = () => (starting ??= doStart().finally(() => (starting = null)));
+const doStart = async () => {
+	if (!settings.enabled || running) return;
+	const mine = ++generation;
 	const error = await startPlayer(settings.mpvPath, buildChain(settings), tidalVolume());
+	if (mine !== generation) return void (error || (await stopPlayer())); // stopped or unloaded meanwhile
 	if (error) {
 		trace.msg.err(`Could not start mpv, TIDAL keeps playing normally. Check the mpv path in TidalEQ settings. (${error})`);
 		return;
 	}
 	running = true;
-	loadedId = analyzedId = null;
+	loadedId = analyzedId = tidalPlaysId = null;
 	lastPaused = null;
 	lastVolume = -1;
 	await sync();
 };
 
 const stop = async () => {
+	generation++;
 	running = false;
-	loadedId = analyzedId = null;
+	loadedId = analyzedId = tidalPlaysId = null;
 	await stopPlayer().catch(() => {});
 	setOriginalVolume(tidalVolume());
 };
@@ -147,7 +179,7 @@ const stop = async () => {
 const APPLY_DELAY_MS = 120;
 let applyTimer: ReturnType<typeof setTimeout> | undefined;
 setEqChangeHandler(() => {
-	if (settings.enabled && !running) return void start();
+	if (settings.enabled && !running) return void (starting ?? start());
 	if (!settings.enabled && running) return void stop();
 	clearTimeout(applyTimer);
 	applyTimer = setTimeout(() => {
@@ -157,8 +189,9 @@ setEqChangeHandler(() => {
 unloads.add(() => clearTimeout(applyTimer));
 
 // TIDAL re-sends its volume to its own player when the slider moves; mute it again right away
+// (only while mpv is the one playing: not for videos or a track TIDAL plays itself)
 redux.intercept("playbackControls/SET_VOLUME", unloads, () => {
-	if (running) setTimeout(() => setOriginalVolume(0), 50);
+	if (running && loadedId !== null && loadedId !== tidalPlaysId) setTimeout(() => setOriginalVolume(0), 50);
 });
 
 safeInterval(unloads, sync, SYNC_MS);

@@ -3,7 +3,7 @@ import { fetchMediaItemStream } from "@luna/lib.native";
 import { spawn, type ChildProcess } from "child_process";
 import { clipboard } from "electron";
 import { randomBytes } from "crypto";
-import { closeSync, openSync, readSync, rmSync } from "fs";
+import { closeSync, fstatSync, openSync, readdirSync, readSync, rmSync } from "fs";
 import { createServer, type Server } from "http";
 import { connect, type Socket } from "net";
 import { tmpdir } from "os";
@@ -18,7 +18,7 @@ let nextRequest = 1;
 const pending = new Map<number, (reply: { error: string; data?: unknown }) => void>();
 // One track per load; the random token keeps other local programs from reading it.
 // The player and the visualizer's decoder share one download: every request replays what arrived so far, then follows.
-type Track = { info: PlaybackInfo; source?: Readable; chunks: Buffer[]; done: boolean; started: boolean; wake: Set<() => void> };
+type Track = { info: PlaybackInfo; source?: Readable; chunks: Buffer[]; done: boolean; failed: boolean; started: boolean; wake: Set<() => void> };
 const streams = new Map<string, Track>();
 const clearStreams = () => {
 	for (const t of streams.values()) t.source?.destroy();
@@ -41,10 +41,10 @@ const startServer = () =>
 					.then((source) => {
 						track.source = source;
 						source.on("data", (c: Buffer) => (track.chunks.push(c), notify()));
-						source.on("end", () => ((track.done = true), notify()));
-						source.on("error", () => ((track.done = true), notify()));
+						source.on("end", () => ((track.done = true), (track.failed = track.chunks.length === 0), notify()));
+						source.on("error", () => ((track.done = true), (track.failed = true), notify()));
 					})
-					.catch(() => ((track.done = true), notify()));
+					.catch(() => ((track.done = true), (track.failed = true), notify()));
 			}
 			res.writeHead(200, { "Content-Type": "application/octet-stream" });
 			let sent = 0;
@@ -114,9 +114,24 @@ const connectIpc = async (pipe: string) => {
 	ipc.on("close", () => (ipc = null));
 };
 
+/** False once mpv has exited or its connection dropped (crashed, killed by the user...). */
+export const isAlive = () => mpv !== null && mpv.exitCode === null && ipc !== null;
+/** True when the current track's download failed: the renderer then lets TIDAL play it. */
+export const trackFailed = () => [...streams.values()].some((t) => t.failed);
+
+// Temp files of a TIDAL session that crashed before cleaning up
+const removeStaleTempFiles = () => {
+	try {
+		for (const f of readdirSync(tmpdir())) if (/^tidaleq-[0-9a-f]{16}\.pcm$/.test(f)) rmSync(join(tmpdir(), f), { force: true });
+	} catch {
+		// in use or not allowed: harmless
+	}
+};
+
 /** Starts mpv (idle, no window) with the equalizer chain. Returns an error message, or "" when ready. */
 export const startPlayer = async (mpvPath: string, chain: string, volume: number): Promise<string> => {
 	await stopPlayer();
+	removeStaleTempFiles();
 	mpvBinary = mpvPath;
 	try {
 		await startServer();
@@ -128,6 +143,8 @@ export const startPlayer = async (mpvPath: string, chain: string, volume: number
 				"--no-video",
 				"--no-terminal",
 				"--no-config",
+				"--load-scripts=no",
+				"--ytdl=no",
 				"--audio-display=no",
 				"--cache=yes",
 				"--demuxer-max-bytes=300MiB",
@@ -154,7 +171,7 @@ let currentUrl = "";
 export const loadTrack = async (info: PlaybackInfo, startAt: number, paused: boolean) => {
 	const token = randomBytes(16).toString("hex");
 	clearStreams();
-	streams.set(token, { info, chunks: [], done: false, started: false, wake: new Set() });
+	streams.set(token, { info, chunks: [], done: false, failed: false, started: false, wake: new Set() });
 	const url = `http://127.0.0.1:${port}/track/${token}`;
 	currentUrl = url;
 	stopDecoder();
@@ -187,7 +204,7 @@ const startDecoder = (url: string, rate: number) => {
 	decoderDone = false;
 	const proc = spawn(
 		mpvBinary,
-		["--no-config", "--no-video", "--no-terminal", "--audio-display=no", "--ao=pcm", `--ao-pcm-file=${file}`, "--ao-pcm-waveheader=no",
+		["--no-config", "--load-scripts=no", "--ytdl=no", "--no-video", "--no-terminal", "--audio-display=no", "--ao=pcm", `--ao-pcm-file=${file}`, "--ao-pcm-waveheader=no",
 			"--audio-format=float", "--audio-channels=mono", `--audio-samplerate=${Math.round(rate)}`, url],
 		{ windowsHide: true, stdio: "ignore" },
 	);
@@ -219,8 +236,11 @@ export const readPcm = (offset: number, maxBytes = 1 << 22): { data: Uint8Array 
 		return { data: null, done: finished };
 	}
 	try {
-		const buf = Buffer.alloc(maxBytes);
-		const n = readSync(fd, buf, 0, maxBytes, offset);
+		// Only what's there: this runs several times a second and usually finds nothing new
+		const available = Math.min(maxBytes, Math.max(0, fstatSync(fd).size - offset));
+		if (!available) return { data: null, done: finished };
+		const buf = Buffer.allocUnsafe(available);
+		const n = readSync(fd, buf, 0, available, offset);
 		return { data: n ? buf.subarray(0, n) : null, done: finished && n < maxBytes };
 	} finally {
 		closeSync(fd);

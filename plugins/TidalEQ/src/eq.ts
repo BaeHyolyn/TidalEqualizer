@@ -154,7 +154,8 @@ export const buildChain = (s: EqSettings): string => {
 		const f = bandFilter(band);
 		if (f) filters.push(f);
 	}
-	if (s.smartVolume !== "off" && SMART_VOLUME[s.smartVolume]) filters.push(SMART_VOLUME[s.smartVolume]);
+	// own keys only: a tampered stored value like "constructor" must not reach mpv's arguments
+	if (s.smartVolume !== "off" && Object.hasOwn(SMART_VOLUME, s.smartVolume)) filters.push(SMART_VOLUME[s.smartVolume]);
 	if (s.limiter) filters.push("alimiter=limit=0.97:level=0");
 	return filters.length ? `lavfi=[${filters.join(",")}]` : "";
 };

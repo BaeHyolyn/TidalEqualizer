@@ -43,7 +43,7 @@ const field: React.CSSProperties = {
 	textAlign: "center",
 };
 
-export const BandEditor = ({ band, index, onChange }: { band: Band; index: number; onChange: (b: Band) => void }) => {
+export const BandEditor = ({ band, onChange }: { band: Band; onChange: (b: Band) => void }) => {
 	const noGain = band.type === "highpass" || band.type === "lowpass";
 	const item = (label: string, control: React.ReactNode) => (
 		<label style={{ ...cell, alignItems: "stretch", flex: "1 1 90px" }}>
@@ -88,6 +88,15 @@ export const MacroSlider = ({ label, value, onChange }: { label: string; value: 
 );
 
 // Each view keeps its own copy and writes every change through to storage
+const currentEq = (): EqSettings => ({
+	enabled: settings.enabled,
+	preamp: settings.preamp,
+	bands: settings.bands.map((b) => ({ ...b })),
+	macros: { ...settings.macros },
+	smartVolume: settings.smartVolume,
+	limiter: settings.limiter,
+});
+
 export const useEq = () => {
 	const [eq, setEq] = React.useState<EqSettings>(() => ({
 		enabled: settings.enabled,
@@ -98,7 +107,8 @@ export const useEq = () => {
 		limiter: settings.limiter,
 	}));
 	const update = (next: Partial<EqSettings>) => {
-		const merged = { ...eq, ...next };
+		// Merge into what's stored, not this view's copy: the settings page and the Equalizer tab can both be open
+		const merged = { ...eq, ...currentEq(), ...next };
 		setEq(merged);
 		Object.assign(settings, merged);
 		onEqChange();
@@ -143,7 +153,7 @@ export const EqEditor = ({ eq, update }: { eq: EqSettings; update: (next: Partia
 			<div style={{ padding: "8px 0" }}>
 				<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
 					<span style={{ fontWeight: 600 }}>Bands</span>
-					<button type="button" onClick={() => update({ bands: PRESETS.flat.bands(), macros: { bass: 0, voice: 0, treble: 0 } })}
+					<button type="button" onClick={() => update({ bands: PRESETS.flat.bands(), preamp: 0, macros: { bass: 0, voice: 0, treble: 0 } })}
 						style={{ ...field, width: "auto", padding: "4px 10px" }}>
 						Reset
 					</button>
@@ -155,7 +165,7 @@ export const EqEditor = ({ eq, update }: { eq: EqSettings; update: (next: Partia
 					<MacroSlider label="Treble" value={eq.macros.treble} onChange={(v) => setMacro("treble", v)} />
 				</div>
 				{selected !== null && eq.bands[selected] ? (
-					<BandEditor band={eq.bands[selected]} index={selected} onChange={(b) => setBand(selected, b)} />
+					<BandEditor band={eq.bands[selected]} onChange={(b) => setBand(selected, b)} />
 				) : (
 					<p style={{ ...small, marginTop: 10 }}>
 						Drag a dot to move a band (left/right = frequency, up/down = gain). Scroll on a selected dot to change its width. Double-click resets it to 0 dB.
@@ -179,7 +189,8 @@ export const Settings = () => {
 				value={String(eq.preamp)}
 				onChange={(e) => update({ preamp: +(e.target.value as string) })}
 			>
-				{[0, -1, -2, -3, -4, -5, -6, -8, -10, -12].map((v) => (
+				{/* Half-dB steps, so every preset's preamp shows up */}
+				{Array.from({ length: 25 }, (_, i) => -i / 2).map((v) => (
 					<LunaSelectItem key={v} value={String(v)}>
 						{v} dB
 					</LunaSelectItem>

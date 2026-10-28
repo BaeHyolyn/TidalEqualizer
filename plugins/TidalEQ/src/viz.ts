@@ -24,9 +24,9 @@ export type VizSettings = {
 	colorMode: VizColorMode;
 	color1: string;
 	color2: string;
-	colorPoints: [number, number][]; // where "From cover" picks its colours, as 0..1 positions on the cover (manual mode)
-	autoColors: boolean; // pick the colour points again from every new cover
-	colorCount: number; // how many colours auto mode picks
+	colorPoints: [number, number][]; // where "From cover" picks its colors, as 0..1 positions on the cover (manual mode)
+	autoColors: boolean; // pick the color points again from every new cover
+	colorCount: number; // how many colors auto mode picks
 	opacity: number; // 0..1
 	glow: number; // px
 	sensitivity: number; // dB of headroom: lower = taller bars
@@ -210,10 +210,10 @@ const fromHsl = (h: number, s: number, l: number) => {
 	};
 	return `rgb(${ch(h + 1 / 3)},${ch(h)},${ch(h - 1 / 3)})`;
 };
-// Colours darker than this are lifted, so a point on a black area still shows on TIDAL's tinted background
+// Colors darker than this are lifted, so a point on a black area still shows on TIDAL's tinted background
 const MIN_LIGHTNESS = 0.55;
 
-/** Average colour around each point of a GRID x GRID RGBA image, brightened when too dark to see. */
+/** Average color around each point of a GRID x GRID RGBA image, brightened when too dark to see. */
 export const sampleColors = (pixels: Uint8ClampedArray, points: [number, number][]) =>
 	points.map(([px, py]) => {
 		const cx = Math.round(Math.min(1, Math.max(0, px)) * (GRID - 1));
@@ -253,7 +253,7 @@ export const coverPixels = (src: string) => {
 };
 
 /**
- * Points on the most vivid, mutually different colours of the cover (GRID x GRID RGBA pixels):
+ * Points on the most vivid, mutually different colors of the cover (GRID x GRID RGBA pixels):
  * the most vivid first, then each next one as vivid as possible and as far as possible from those already picked.
  */
 export const autoPoints = (pixels: Uint8ClampedArray, count = 4): [number, number][] => {
@@ -267,7 +267,7 @@ export const autoPoints = (pixels: Uint8ClampedArray, count = 4): [number, numbe
 		}
 	const picked: typeof cells = [];
 	const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) / 441;
-	// Colours closer than this to one already picked are skipped, unless the cover has nothing else
+	// Colors closer than this to one already picked are skipped, unless the cover has nothing else
 	let minApart = 0.18;
 	while (picked.length < count && picked.length < cells.length) {
 		let best: (typeof cells)[number] | null = null;
@@ -275,17 +275,17 @@ export const autoPoints = (pixels: Uint8ClampedArray, count = 4): [number, numbe
 		for (const c of cells) {
 			const apart = picked.length ? Math.min(...picked.map((p) => dist(p.rgb, c.rgb))) : 1;
 			if (apart < minApart) continue;
-			// Being different from the colours already picked matters more than being vivid, so the ring isn't one colour 4 times
+			// Being different from the colors already picked matters more than being vivid, so the ring isn't one color 4 times
 			const score = c.vivid * 0.35 + apart * 0.65;
 			if (score > bestScore && !picked.includes(c)) (best = c), (bestScore = score);
 		}
 		if (best) picked.push(best);
-		else minApart /= 2; // a one-colour cover: accept closer colours
+		else minApart /= 2; // a one-color cover: accept closer colors
 	}
-	// In hue order, so the ring flows from one colour to the next instead of jumping around
+	// In hue order, so the ring flows from one color to the next instead of jumping around
 	const hue = (c: (typeof cells)[number]) => {
 		const [h, sat] = toHsl(...c.rgb);
-		return sat < 0.12 ? 2 + toHsl(...c.rgb)[2] : h; // greys after the colours, dark to light
+		return sat < 0.12 ? 2 + toHsl(...c.rgb)[2] : h; // greys after the colors, dark to light
 	};
 	picked.sort((a, b) => hue(a) - hue(b));
 	return picked.map((c) => [Math.round((c.x / (GRID - 1)) * 1000) / 1000, Math.round((c.y / (GRID - 1)) * 1000) / 1000]);
@@ -350,7 +350,7 @@ export const sanitizeViz = (input: unknown): VizSettings => {
 	return out;
 };
 
-/** Ready-made looks. Applying one keeps the on/off switch and the colour points. */
+/** Ready-made looks. Applying one keeps the on/off switch and the color points. */
 export const VIZ_PRESETS: Record<string, { label: string; viz: Partial<VizSettings> }> = {
 	default: { label: "Default", viz: {} },
 	minimal: { label: "Minimal", viz: { bars: 72, width: 0.35, length: 28, glow: 0, opacity: 0.7, pulse: 0, smoothing: 0.5 } },

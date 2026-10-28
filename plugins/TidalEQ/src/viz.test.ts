@@ -33,7 +33,7 @@ assert(risen - state[3] < risen * 0.2, "falls slower than it rose");
 for (let i = 0; i < 200; i++) smoothBars(state, new Float32Array(8), out, 16, opts);
 assert(Math.max(...out) < 0.01, "everything settles back to zero");
 
-// Colour points: left half red, right half blue, top rows black; each point reads its side, dark ones are lifted
+// Color points: left half red, right half blue, top rows black; each point reads its side, dark ones are lifted
 const px = new Uint8ClampedArray(64 * 64 * 4);
 for (let i = 0; i < 64 * 64; i++) px.set(i < 64 * 8 ? [0, 0, 0, 255] : i % 64 < 32 ? [255, 0, 0, 255] : [0, 0, 255, 255], i * 4);
 assert.deepStrictEqual(sampleColors(px, [[0.1, 0.5], [0.9, 0.5], [2, 2]]), ["rgb(255,26,26)", "rgb(26,26,255)", "rgb(26,26,255)"]);
@@ -42,14 +42,14 @@ assert.deepStrictEqual(sampleColors(px, [[0.5, 0]]), ["rgb(140,140,140)"], "blac
 // Auto points land on the two vivid halves, not on the black band
 const auto = autoPoints(px, 2);
 assert(auto.every(([, y]) => y > 8 / 63), "no auto point on black");
-assert(auto.some(([x]) => x < 0.5) && auto.some(([x]) => x > 0.5), "one point on each colour");
+assert(auto.some(([x]) => x < 0.5) && auto.some(([x]) => x > 0.5), "one point on each color");
 
 // Auto points come back in hue order (green stripe left, blue middle, red right → red, green, blue), up to 24
 const stripes = new Uint8ClampedArray(64 * 64 * 4);
 for (let i = 0; i < 64 * 64; i++) stripes.set(i % 64 < 21 ? [0, 200, 0, 255] : i % 64 < 42 ? [0, 0, 220, 255] : [220, 0, 0, 255], i * 4);
 const ordered = autoPoints(stripes, 3);
 assert(ordered[0][0] > 0.66 && ordered[1][0] < 0.33 && ordered[2][0] > 0.33 && ordered[2][0] < 0.66, `hue order: ${JSON.stringify(ordered)}`);
-assert.strictEqual(autoPoints(stripes, 24).length, 24, "24 points even when the cover has few colours");
+assert.strictEqual(autoPoints(stripes, 24).length, 24, "24 points even when the cover has few colors");
 
 // Pasted settings: unknown keys dropped, bad values ignored, numbers clamped, points validated
 const pasted = sanitizeViz({ bars: 9999, style: "laser", glow: "lots", color1: "red", colorPoints: [[0.5, 2], ["x", 1]], evil: "<script>", opacity: 0.5 });

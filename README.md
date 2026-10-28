@@ -17,6 +17,8 @@ TidalEQ is an equalizer plugin for [TidaLuna](https://github.com/Inrixia/TidaLun
 
 5. Install **TidalEQ** from the store that appears.
 
+TidalEQ works on Windows (it talks to mpv through a Windows named pipe).
+
 Turn off TIDAL's exclusive mode: TidalEQ plays the audio itself, and exclusive mode would lock the output device.
 
 ## Features
@@ -28,7 +30,7 @@ Turn off TIDAL's exclusive mode: TidalEQ plays the audio itself, and exclusive m
 - **Preamp**, **smart volume** (evens out loud and quiet parts) and a **limiter** so boosts never clip.
 - **Visualizer** around the cover: the real spectrum of what you hear, after your equalizer. Everything is adjustable live from its tab:
   - bars, wave or dots; following the cover or in a circle; outside, inside or both ways; mirror; bar count, size and distance;
-  - colours from the cover (up to 24, picked again automatically on every song, or placed by hand), solid, gradient or rainbow; opacity and glow;
+  - colors from the cover (up to 24, picked again automatically on every song, or placed by hand), solid, gradient or rainbow; opacity and glow;
   - rotation, spin, a cover that beats with the bass, rise/fall smoothing;
   - sensitivity, frequency range, treble lift, sync offset and frame rate.
 - **Presets** for the visualizer, plus your own saved looks, and **Copy / Paste settings** to share them.
