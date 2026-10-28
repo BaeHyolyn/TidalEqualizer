@@ -170,7 +170,8 @@ export const addPanelTab = (unloads: Set<LunaUnload>, id: string, label: string,
 
 		active = true;
 		host = document.createElement("div");
-		host.style.height = "100%";
+		// Scrolls on its own: TIDAL scrolls the Credits element itself (which we hide), not the container we share
+		host.style.cssText = "height:100%;overflow-y:auto;overscroll-behavior:contain;";
 		reattach(panel);
 		root = createRoot(host);
 		const plain = button.className.split(" ").filter((c) => !pressedClasses.includes(c)).join(" ");
