@@ -38,13 +38,29 @@ export const macroBands = (m: Macros): Band[] => [
 
 const withGains = (gains: number[]): Band[] => flatBands().map((b, i) => ({ ...b, gain: gains[i] ?? 0 }));
 
+// Gains for 32 64 125 250 500 1k 2k 4k 8k 16k Hz. Preamp covers each preset's biggest boost.
+const preset = (label: string, preamp: number, gains: number[]) => ({ label, preamp, bands: () => withGains(gains) });
+
 export const PRESETS: Record<string, { label: string; bands: () => Band[]; preamp: number }> = {
 	flat: { label: "Flat", bands: flatBands, preamp: 0 },
-	bass: { label: "Bass Boost", bands: () => withGains([6, 5, 3.5, 1.5, 0, 0, 0, 0, 0, 0]), preamp: -6 },
-	vshape: { label: "V-Shape", bands: () => withGains([4, 3, 1.5, 0, -1.5, -1.5, 0, 2, 3.5, 4]), preamp: -4 },
-	vocal: { label: "Vocal", bands: () => withGains([-2, -1.5, -1, 0.5, 2, 3, 2.5, 1, 0, -1]), preamp: -3 },
-	treble: { label: "Treble Boost", bands: () => withGains([0, 0, 0, 0, 0, 0.5, 1.5, 3, 4.5, 5]), preamp: -5 },
-	warm: { label: "Warm", bands: () => withGains([2, 2.5, 2, 1, 0, -0.5, -1, -1.5, -2, -2.5]), preamp: -3 },
+	deepBass: preset("Music: Deep Bass", -6, [5, 6, 3.5, 0, -1.5, -1, 0, 0, 1, 1.5]),
+	punchy: preset("Music: Punchy", -5, [3, 4.5, 2, -1, -2, 0, 1, 2, 3.5, 3]),
+	bright: preset("Music: Bright", -5, [0, 0, 0, -1, -1.5, 0, 1, 2.5, 4, 4.5]),
+	vocals: preset("Music: Clear Vocals", -4, [-3, -2.5, -1.5, -1, 0.5, 2.5, 3.5, 2, 0, -1]),
+	hiphop: preset("Music: Hip-Hop", -5, [4, 4.5, 2.5, 0, -1, 0, 1, 1, 1.5, 1]),
+	trap: preset("Music: Trap", -5, [5, 5, 2, -0.5, -1.5, -0.5, 0.5, 1.5, 2.5, 2]),
+	edm: preset("Music: EDM", -4.5, [4, 4, 1, -1, -1.5, 0, 1, 2, 3, 3.5]),
+	rock: preset("Music: Rock", -3, [2, 2.5, 1.5, -0.5, -1, 0.5, 2, 2.5, 2, 1.5]),
+	metal: preset("Music: Metal", -3.5, [2.5, 2, 0.5, -1.5, -1, 1, 2, 3, 2.5, 1.5]),
+	pop: preset("Music: Pop", -2.5, [1.5, 2, 1, 0, -0.5, 0.5, 1.5, 2, 2, 1.5]),
+	kpop: preset("Music: K-Pop", -3, [2, 2.5, 1, 0, -0.5, 1, 2, 2, 2.5, 2]),
+	jazz: preset("Music: Jazz", -2, [1, 1.5, 1.5, 0.5, 0, 0, -0.5, 0, 0.5, 1]),
+	classical: preset("Music: Classical", -2.5, [1, 1, 0.5, 0, 0, 0, 0, 0.5, 1.5, 2]),
+	lofi: preset("Music: Lo-fi", -3, [1.5, 2.5, 2, 0.5, 0, -1, -1.5, -1, -0.5, -2]),
+	acoustic: preset("Music: Acoustic", -2.5, [0.5, 1, 1.5, 1, 0, 0.5, 1.5, 2, 1.5, 1]),
+	podcast: preset("Podcast", -3, [-6, -3, 0, 1, 1, 2, 3, 2, 0, -2]),
+	dialog: preset("Movie: Dialog", -3.5, [-3, -2, -1, 0, 1, 2.5, 3, 2, 1, 0]),
+	immersion: preset("Movie: Immersion", -4, [3.5, 3, 1.5, 0, -1, 0, 0.5, 1.5, 3, 3.5]),
 };
 
 const clamp = (v: number, lo: number, hi: number, fallback: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
