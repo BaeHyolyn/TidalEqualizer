@@ -26,7 +26,13 @@ Turn off TIDAL's exclusive mode: TidalEQ plays the audio itself, and exclusive m
 - **Bass, Voice and Treble** sliders for quick broad changes.
 - **19 presets**: Deep Bass, Punchy, Bright, Clear Vocals, Hip-Hop, Trap, EDM, Rock, Metal, Pop, K-Pop, Jazz, Classical, Lo-fi, Acoustic, Podcast, Movie Dialog, Movie Immersion and Flat.
 - **Preamp**, **smart volume** (evens out loud and quiet parts) and a **limiter** so boosts never clip.
-- **Visualizer** around the cover: the real spectrum of what you hear, after your equalizer. Everything is adjustable live from its tab: bars, wave or dots; following the cover or in a circle; outside, inside or both ways; mirror; bar count, size and distance; colors from the cover, solid, gradient or rainbow; glow, rotation, spin and a cover that beats with the bass; sensitivity, frequency range, rise/fall smoothing, sync offset and frame rate.
+- **Visualizer** around the cover: the real spectrum of what you hear, after your equalizer. Everything is adjustable live from its tab:
+  - bars, wave or dots; following the cover or in a circle; outside, inside or both ways; mirror; bar count, size and distance;
+  - colours from the cover (up to 24, picked again automatically on every song, or placed by hand), solid, gradient or rainbow; opacity and glow;
+  - rotation, spin, a cover that beats with the bass, rise/fall smoothing;
+  - sensitivity, frequency range, treble lift, sync offset and frame rate.
+- **Presets** for the visualizer, plus your own saved looks, and **Copy / Paste settings** to share them.
+- Every setting can go back to its default on its own (↺ or double-click), per section, or all at once.
 
 ## How it works
 
