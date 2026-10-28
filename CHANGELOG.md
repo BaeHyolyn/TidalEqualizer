@@ -4,6 +4,7 @@
 
 ### Fixed
 - Visualizer not showing on albums with an animated cover, which TIDAL plays as a video (#11).
+- Visualizer off-center (up to ~35 px) while the cover beats, more so the further right the cover sits (#13).
 - If mpv crashes or is closed, TIDAL takes the sound back instead of staying muted, with a notice (#12).
 - A track whose download fails plays through TIDAL instead of staying silent, without retrying in a loop (#12).
 - Changing the equalizer while mpv is still starting no longer launches extra mpv processes (#12).

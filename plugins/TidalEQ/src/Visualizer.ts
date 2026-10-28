@@ -139,9 +139,10 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	// TIDAL's tab bar, player bar and side panel, so the drawing stays clear of them
 	let ui: { panel?: DOMRect; tabs?: DOMRect; player?: DOMRect } = {};
 	let uiAt = 0;
+	let beat = 1; // current cover-beat scale, shared by the cover and the canvas
 	const restoreCover = () => {
 		if (cover) cover.style.scale = "";
-		canvas.style.scale = "";
+		beat = 1;
 	};
 	unloads.add(restoreCover);
 
@@ -261,8 +262,9 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			let bass = 0;
 			const n = Math.max(1, Math.round(bands * 0.15));
 			for (let b = 0; b < n; b++) bass += shown[b];
-			// The bars grow with it so the cover never covers them
-			cover!.style.scale = canvas.style.scale = String(1 + (bass / n) * v.pulse * 0.06);
+			// The bars grow with it (applied in draw, around the cover's centre) so the cover never covers them
+			beat = 1 + (bass / n) * v.pulse * 0.06;
+			cover!.style.scale = String(beat);
 		} else restoreCover();
 	};
 
@@ -279,7 +281,10 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			canvas.style.width = `${W}px`;
 			canvas.style.height = `${H}px`;
 		} else ctx.clearRect(0, 0, canvas.width, canvas.height);
-		canvas.style.transform = `translate(${Math.round(rect.left - origin.left - margin)}px,${Math.round(rect.top - origin.top - margin)}px) ${tilt}`;
+		// Placed with left/top, not a translate: a scale in the same transform would also scale the offset and push it aside
+		canvas.style.left = `${Math.round(rect.left - origin.left - margin)}px`;
+		canvas.style.top = `${Math.round(rect.top - origin.top - margin)}px`;
+		canvas.style.transform = `${tilt} scale(${beat})`;
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		// Stay clear of TIDAL's own UI: an open side panel (Lyrics, Credits, our tabs), the tab bar above and the player below
 		const left = rect.left - margin;
