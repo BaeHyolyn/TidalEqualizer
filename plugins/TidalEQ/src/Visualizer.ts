@@ -81,18 +81,22 @@ const tiltOf = (img: HTMLElement, wrapper: HTMLElement) => {
 	const parts: string[] = [];
 	for (let el = img.parentElement; el && el !== wrapper; el = el.parentElement) {
 		const t = getComputedStyle(el).transform;
-		if (t && t !== "none" && t !== "matrix(1, 0, 0, 1, 0, 0)") parts.unshift(t);
+		if (!t || t === "none") continue;
+		// Keep only rotation/tilt: any shift is already in the cover's on-screen position
+		const m = new DOMMatrix(t);
+		m.m41 = m.m42 = m.m43 = 0;
+		if (!m.isIdentity) parts.unshift(m.toString());
 		const p = el.parentElement && getComputedStyle(el.parentElement).perspective;
-		if (p && p !== "none" && parts.length) parts.unshift(`perspective(${p})`);
+		if (p && p !== "none") parts.unshift(`perspective(${p})`);
 	}
 	return parts.join(" ");
 };
 
 export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	const canvas = document.createElement("canvas");
-	// Sits right after the cover inside the now-playing view: above the cover, below the side panel
-	// (a body-level canvas ends up behind TIDAL's layers)
-	canvas.style.cssText = "position:absolute;pointer-events:none;left:0;top:0;";
+	// Sits right after the cover inside the now-playing view, stacked above it so "Inside" bars show over the cover
+	// (a body-level canvas ends up behind TIDAL's layers). It never covers the side panel: drawing is clipped at its edge.
+	canvas.style.cssText = "position:absolute;pointer-events:none;left:0;top:0;z-index:1;";
 	const ctx = canvas.getContext("2d")!;
 	unloads.add(() => canvas.remove());
 
@@ -214,14 +218,19 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		} else ctx.clearRect(0, 0, canvas.width, canvas.height);
 		canvas.style.transform = `translate(${Math.round(rect.left - origin.left - margin)}px,${Math.round(rect.top - origin.top - margin)}px) ${tilt}`;
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		// Never draw over an open side panel (Lyrics, Credits, our tabs): TIDAL can put the cover right next to it
+		// Stay clear of TIDAL's own UI: an open side panel (Lyrics, Credits, our tabs), the tab bar above and the player below
+		const left = rect.left - margin;
+		const top = rect.top - margin;
 		const panel = document.querySelector("[class*=_panelWrapperActive_]")?.getBoundingClientRect();
+		const tabs = document.querySelector("[data-test=new-now-playing] [class*=_contentButtons_]")?.getBoundingClientRect();
+		const player = document.querySelector("[data-test=footer-player]")?.getBoundingClientRect();
+		const x1 = panel && panel.left > rect.right - 1 ? panel.left - 12 - left : W;
+		const y0 = tabs?.height ? tabs.bottom + 4 - top : 0;
+		const y1 = player?.height ? player.top - 4 - top : H;
 		ctx.save();
-		if (panel && panel.left > rect.right - 1) {
-			ctx.beginPath();
-			ctx.rect(0, 0, panel.left - 12 - (rect.left - margin), H);
-			ctx.clip();
-		}
+		ctx.beginPath();
+		ctx.rect(0, y0, x1, y1 - y0);
+		ctx.clip();
 
 		// The cover in canvas coordinates, grown by the gap
 		const cx = W / 2;
@@ -232,6 +241,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const n = v.mirror ? bands * 2 : bands;
 		const perimeter = v.shape === "circle" ? 2 * Math.PI * radius : 4 * (hw + hh);
 		const slot = perimeter / n;
+		// Bar thickness follows the slot, capped so a low bar count doesn't turn into blobs
+		const thick = Math.min(40, Math.max(1, slot * v.width));
 		const turn = v.rotation / 360 + (v.spin * now) / 60000;
 
 		// Point on the outline and its outward direction, for a fraction 0..1 starting at the bottom centre, clockwise on screen
@@ -296,22 +307,27 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			// Smooth closed curve through the tips, via midpoints
 			const mid = (a: [number, number], b: [number, number]) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as const;
 			const start = mid(pts[n - 1], pts[0]);
-			ctx.moveTo(start[0], start[1]);
+			const wave = new Path2D();
+			wave.moveTo(start[0], start[1]);
 			for (let i = 0; i < n; i++) {
 				const m = mid(pts[i], pts[(i + 1) % n]);
-				ctx.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]);
+				wave.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]);
 			}
-			ctx.closePath();
-			ctx.lineWidth = Math.max(1, slot * v.width * 0.5);
+			wave.closePath();
+			// Fill only the band between the outline and the wave, never over the cover itself
+			const band = new Path2D(wave);
+			if (v.shape === "circle") band.moveTo(cx + radius, cy), band.arc(cx, cy, radius, 0, 2 * Math.PI);
+			else band.rect(cx - hw, cy - hh, hw * 2, hh * 2);
+			ctx.lineWidth = Math.max(1, thick * 0.5);
 			ctx.globalAlpha = v.opacity * 0.35;
-			ctx.fill();
+			ctx.fill(band, "evenodd");
 			ctx.globalAlpha = v.opacity;
-			ctx.stroke();
+			ctx.stroke(wave);
 		} else if (v.style === "dots") {
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at((i + 0.5) / n + turn);
 				const [, end] = span(2 + valueAt(i)[0] * v.length);
-				const r = Math.max(1, (slot * v.width) / 2);
+				const r = thick / 2;
 				ctx.moveTo(x + nx * end + r, y + ny * end);
 				ctx.arc(x + nx * end, y + ny * end, r, 0, 2 * Math.PI);
 			}
@@ -324,7 +340,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 				ctx.moveTo(x + nx * a, y + ny * a);
 				ctx.lineTo(x + nx * b, y + ny * b);
 			}
-			ctx.lineWidth = Math.max(1, slot * v.width);
+			ctx.lineWidth = thick;
 			ctx.stroke();
 		}
 
@@ -337,7 +353,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 				ctx.moveTo(x + nx * end, y + ny * end);
 				ctx.lineTo(x + nx * (end + 2 * Math.sign(end || 1)), y + ny * (end + 2 * Math.sign(end || 1)));
 			}
-			ctx.lineWidth = Math.max(1, slot * v.width);
+			ctx.lineWidth = thick;
 			ctx.stroke();
 		}
 		ctx.restore();

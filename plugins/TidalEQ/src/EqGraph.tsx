@@ -53,6 +53,10 @@ type Props = {
 
 export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) => {
 	const svg = React.useRef<SVGSVGElement>(null);
+	// Ids must be unique per graph: with two on the page (settings + Equalizer tab) the browser would use the first one's clip
+	const uid = React.useId().replace(/:/g, "");
+	const clipId = `tidaleq-plot-${uid}`;
+	const fillId = `tidaleq-fill-${uid}`;
 	const [VW, setVW] = React.useState(1000);
 	React.useEffect(() => {
 		const el = svg.current;
@@ -124,10 +128,10 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 			aria-label="Equalizer frequency response"
 		>
 			<defs>
-				<clipPath id="tidaleq-plot">
+				<clipPath id={clipId}>
 					<rect x={L} y={TOP} width={PW} height={PH} />
 				</clipPath>
-				<linearGradient id="tidaleq-fill" x1="0" y1="0" x2="0" y2="1">
+				<linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
 					<stop offset="0%" stopColor={C.curve} stopOpacity={0.18} />
 					<stop offset="50%" stopColor={C.curve} stopOpacity={0.02} />
 					<stop offset="100%" stopColor={C.curve} stopOpacity={0.18} />
@@ -162,8 +166,8 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 				</g>
 			))}
 
-			<path d={`${curve}L${x(20000)},${y(0)}L${x(F_MIN)},${y(0)}Z`} fill="url(#tidaleq-fill)" clipPath="url(#tidaleq-plot)" />
-			<path d={curve} fill="none" stroke={C.curve} strokeWidth={2} clipPath="url(#tidaleq-plot)" />
+			<path d={`${curve}L${x(20000)},${y(0)}L${x(F_MIN)},${y(0)}Z`} fill={`url(#${fillId})`} clipPath={`url(#${clipId})`} />
+			<path d={curve} fill="none" stroke={C.curve} strokeWidth={2} clipPath={`url(#${clipId})`} />
 
 			{bands.map((b, i) => {
 				const cx = x(Math.min(20000, Math.max(20, b.freq)));

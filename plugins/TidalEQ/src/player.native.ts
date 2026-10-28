@@ -181,7 +181,7 @@ let pcmFile: string | null = null;
 let decoderDone = false;
 
 const startDecoder = (url: string, rate: number) => {
-	const file = join(tmpdir(), `tidaleq-${process.pid}-${randomBytes(4).toString("hex")}.pcm`);
+	const file = join(tmpdir(), `tidaleq-${randomBytes(8).toString("hex")}.pcm`); // process.pid is undefined in Luna's sandbox
 	pcmFile = file;
 	decoderDone = false;
 	const proc = spawn(
