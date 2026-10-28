@@ -4,10 +4,11 @@ import { ipcRenderer, MediaItem, PlayState, redux, safeInterval } from "@luna/li
 import { buildChain } from "./eq";
 import { addPanelTab, EqPanel } from "./NowPlayingTab";
 import {
-	getTime, isAlive, loadTrack, seek, setChain, setPaused, setVolume, startAnalysis, startPlayer, stopAnalysis, stopPlayer, stopTrack, trackFailed,
+	getTime, isAlive, loadTrack, prepareTrack, seek, setChain, setPaused, setVolume, startAnalysis, startPlayer, stopAnalysis, stopPlayer, stopTrack,
+	trackFailed,
 } from "./player.native";
 import { setEqChangeHandler, settings, vizSettings } from "./Settings";
-import { resetPcm, startVisualizer } from "./Visualizer";
+import { resetPcm, setPositionSource, startVisualizer } from "./Visualizer";
 import { VizPanel } from "./VizPanel";
 import { PCM_RATE } from "./viz";
 
@@ -92,7 +93,7 @@ const sync = async () => {
 		// The visualizer decodes the track separately; (re)start it when turned on or after a track change
 		const wantAnalysis = vizSettings().enabled;
 		if (wantAnalysis && analyzedId !== loadedId) {
-			await startAnalysis(PCM_RATE);
+			await startAnalysis(PCM_RATE, settings.mpvPath);
 			resetPcm(true);
 			analyzedId = loadedId;
 		} else if (!wantAnalysis && analyzedId !== null) {
@@ -150,6 +151,38 @@ const letTidalPlay = async (id: MediaItem["id"], why: string) => {
 };
 
 // One start at a time: EQ changes during a slow start would otherwise launch more mpv processes
+/**
+ * Equalizer off: TIDAL plays on its own and nothing is muted. If the visualizer is on, the track is only downloaded
+ * and decoded for it, and the bars follow TIDAL's position.
+ */
+let vizOnlyId: MediaItem["id"] | null = null;
+const syncVisualizerOnly = async () => {
+	if (running || busy) return;
+	busy = true;
+	try {
+		const media = vizSettings().enabled ? await MediaItem.fromPlaybackContext() : undefined;
+		if (!media || media.contentType !== "track") {
+			if (vizOnlyId !== null) {
+				vizOnlyId = null;
+				await stopAnalysis();
+				resetPcm(false);
+			}
+			return;
+		}
+		if (media.id === vizOnlyId) return;
+		vizOnlyId = media.id;
+		const info = await media.playbackInfo(PlayState.playbackContext?.actualAudioQuality).catch(() => undefined);
+		if (!info || running) return;
+		await prepareTrack(info);
+		await startAnalysis(PCM_RATE, settings.mpvPath);
+		resetPcm(true);
+	} catch (err) {
+		trace.warn("visualizer: could not prepare the track", err);
+	} finally {
+		busy = false;
+	}
+};
+
 const start = () => (starting ??= doStart().finally(() => (starting = null)));
 const doStart = async () => {
 	if (!settings.enabled || running) return;
@@ -161,6 +194,7 @@ const doStart = async () => {
 		return;
 	}
 	running = true;
+	vizOnlyId = null; // the player takes over the shared download from here
 	loadedId = analyzedId = tidalPlaysId = null;
 	lastPaused = null;
 	lastVolume = -1;
@@ -194,7 +228,9 @@ redux.intercept("playbackControls/SET_VOLUME", unloads, () => {
 	if (running && loadedId !== null && loadedId !== tidalPlaysId) setTimeout(() => setOriginalVolume(0), 50);
 });
 
-safeInterval(unloads, sync, SYNC_MS);
+safeInterval(unloads, () => (running ? sync() : syncVisualizerOnly()), SYNC_MS);
+// The visualizer follows mpv when it plays, otherwise TIDAL's own position
+setPositionSource(async () => (running ? getTime() : tidalPosition()));
 unloads.add(stop);
 addPanelTab(unloads, "tidaleq", "Equalizer", EqPanel);
 addPanelTab(unloads, "tidaleq-visualizer", "Visualizer", VizPanel);

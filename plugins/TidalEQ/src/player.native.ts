@@ -28,6 +28,11 @@ let mpvBinary = "";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// The local server is shared by the player and the visualizer's decoder, and starts with whichever needs it first
+const ensureServer = async () => {
+	if (!server) await startServer();
+};
+
 const startServer = () =>
 	new Promise<void>((resolve, reject) => {
 		server = createServer(async (req, res) => {
@@ -134,7 +139,7 @@ export const startPlayer = async (mpvPath: string, chain: string, volume: number
 	removeStaleTempFiles();
 	mpvBinary = mpvPath;
 	try {
-		await startServer();
+		await ensureServer();
 		const pipe = `\\\\.\\pipe\\tidaleq-${process.pid}-${randomBytes(4).toString("hex")}`;
 		mpv = spawn(
 			mpvPath,
@@ -168,19 +173,29 @@ export const startPlayer = async (mpvPath: string, chain: string, volume: number
 
 let currentUrl = "";
 
-export const loadTrack = async (info: PlaybackInfo, startAt: number, paused: boolean) => {
+/** Serves a track on the local server (replacing the previous one) and returns its URL; nothing plays yet. */
+export const prepareTrack = async (info: PlaybackInfo) => {
+	await ensureServer();
 	const token = randomBytes(16).toString("hex");
 	clearStreams();
 	streams.set(token, { info, chunks: [], done: false, failed: false, started: false, wake: new Set() });
-	const url = `http://127.0.0.1:${port}/track/${token}`;
-	currentUrl = url;
+	currentUrl = `http://127.0.0.1:${port}/track/${token}`;
 	stopDecoder();
+	return currentUrl;
+};
+
+export const loadTrack = async (info: PlaybackInfo, startAt: number, paused: boolean) => {
+	const url = await prepareTrack(info);
 	await command("set_property", "pause", paused);
 	await command("loadfile", url, "replace", -1, `start=${Math.max(0, startAt).toFixed(2)}`);
 };
 
-/** Decodes the loaded track to mono float samples at `rate` for the visualizer (read them with readPcm). */
-export const startAnalysis = (rate: number) => {
+/**
+ * Decodes the current track (loaded or just prepared) to mono float samples at `rate` for the visualizer (see readPcm).
+ * Works without the player running: the visualizer can be on while the equalizer is off.
+ */
+export const startAnalysis = (rate: number, mpvPath: string) => {
+	if (mpvPath) mpvBinary = mpvPath;
 	stopDecoder();
 	if (currentUrl && streams.size) startDecoder(currentUrl, rate);
 };

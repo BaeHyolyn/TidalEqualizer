@@ -345,11 +345,11 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 			<div style={{ margin: "auto 0", paddingBottom: 48 }}>
 				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
 					<p style={text}>
-						{!eqOn
-							? "Turn the equalizer on: the visualizer reads the audio mpv plays."
-							: playing
+						{!playing
+							? "Music paused: showing a preview so you can still see your changes."
+							: eqOn
 								? "Spectrum around the cover, after your equalizer."
-								: "Music paused: showing a preview so you can still see your changes."}
+								: "Spectrum around the cover. The equalizer is off, so it shows the original sound."}
 					</p>
 					<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
 						<Pill looks={looks} pressed={viz.enabled} onClick={() => update({ enabled: !viz.enabled })}>

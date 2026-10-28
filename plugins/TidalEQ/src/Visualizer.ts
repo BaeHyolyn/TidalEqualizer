@@ -2,7 +2,7 @@ import type { LunaUnload } from "@luna/core";
 import { MediaItem, PlayState } from "@luna/lib";
 
 import { responseDb } from "./eq";
-import { getTime, readPcm } from "./player.native";
+import { readPcm } from "./player.native";
 import { settings, vizSettings } from "./Settings";
 import { analyze, autoPoints, bandEdges, bandLevels, coverPixels, PCM_RATE, sampleColors, smoothBars, type VizSettings } from "./viz";
 
@@ -31,8 +31,11 @@ let pulling = false;
 
 // Playing position: polled from mpv a few times a second, extrapolated in between
 let polled = { time: 0, at: 0 };
+// Where the playing position comes from: mpv while it plays, TIDAL's player when the equalizer is off
+let positionSource: () => Promise<number | null> = async () => null;
+export const setPositionSource = (fn: typeof positionSource) => (positionSource = fn);
 const pollTime = async () => {
-	const time = await getTime();
+	const time = await positionSource();
 	if (time !== null) polled = { time, at: performance.now() };
 };
 const position = (offsetMs: number) => {
@@ -175,7 +178,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const dt = Math.min(100, now - last);
 		last = now;
 		// Off: don't touch the page at all
-		if (!v.enabled || !settings.enabled) {
+		if (!v.enabled) {
 			if (canvas.width) canvas.width = 0;
 			restoreCover();
 			return;

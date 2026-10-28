@@ -40,7 +40,7 @@ Turn off TIDAL's exclusive mode: TidalEQ plays the audio itself, and exclusive m
 
 TIDAL's desktop app plays audio in a separate native player that plugins can't reach, so TidalEQ plays each track through [mpv](https://mpv.io) with your equalizer instead. TIDAL's own player keeps running silently, so the progress bar, queue, play/pause, seeking and volume all work as usual and mpv follows them. Videos are left to TIDAL.
 
-The visualizer needs the equalizer on: a second, silent mpv decodes the same download into samples, and the spectrum is computed in sync with what mpv is playing.
+The visualizer works with the equalizer on or off. A second, silent mpv decodes the track into samples (sharing the equalizer's download when it's on), and the spectrum follows what mpv plays, or TIDAL's own player when the equalizer is off. It still needs mpv installed.
 
 If mpv can't start, TidalEQ tells you and TIDAL keeps playing normally.
 
