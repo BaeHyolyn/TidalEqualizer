@@ -14,18 +14,17 @@ const DB = 12; // plot range: -12..+12 dB
 const F_MIN = 20;
 const DECADES = 3; // 20 Hz .. 20 kHz
 
+// Translucent whites so the graph sits on TIDAL's artwork-tinted background
 const C = {
-	panel: "#11151c",
-	plot: "#0b0e13",
-	grid: "#18202a",
-	gridStrong: "#243040",
-	label: "#6f8195",
-	curve: "#22d3ee",
-	header: "#151b24",
-	selected: "#fbbf24",
+	panel: "transparent",
+	plot: "rgba(255,255,255,0.03)",
+	grid: "rgba(255,255,255,0.05)",
+	gridStrong: "rgba(255,255,255,0.12)",
+	label: "rgba(255,255,255,0.55)",
+	curve: "#ffffff",
+	header: "rgba(255,255,255,0.04)",
+	selected: "#33ffee",
 };
-// Cool tones from cyan to violet, low to high frequency
-export const BAND_COLORS = ["#22d3ee", "#2cc6f0", "#38b6f5", "#4aa4f8", "#5d92fa", "#7180fb", "#866ff9", "#9a60f5", "#ad54ef", "#bf4ae6"];
 
 const REGIONS: [number, number, string][] = [
 	[20, 60, "SUB BASS"],
@@ -120,9 +119,9 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 					<rect x={L} y={TOP} width={PW} height={PH} />
 				</clipPath>
 				<linearGradient id="tidaleq-fill" x1="0" y1="0" x2="0" y2="1">
-					<stop offset="0%" stopColor={C.curve} stopOpacity={0.35} />
-					<stop offset="50%" stopColor={C.curve} stopOpacity={0.06} />
-					<stop offset="100%" stopColor={C.curve} stopOpacity={0.35} />
+					<stop offset="0%" stopColor={C.curve} stopOpacity={0.18} />
+					<stop offset="50%" stopColor={C.curve} stopOpacity={0.02} />
+					<stop offset="100%" stopColor={C.curve} stopOpacity={0.18} />
 				</linearGradient>
 			</defs>
 
@@ -155,12 +154,11 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 			))}
 
 			<path d={`${curve}L${x(20000)},${y(0)}L${x(F_MIN)},${y(0)}Z`} fill="url(#tidaleq-fill)" clipPath="url(#tidaleq-plot)" />
-			<path d={curve} fill="none" stroke={C.curve} strokeWidth={2.5} clipPath="url(#tidaleq-plot)" />
+			<path d={curve} fill="none" stroke={C.curve} strokeWidth={2} clipPath="url(#tidaleq-plot)" />
 
 			{bands.map((b, i) => {
 				const cx = x(Math.min(20000, Math.max(20, b.freq)));
 				const cy = y(noGain(b) ? 0 : Math.max(-DB, Math.min(DB, b.gain)));
-				const color = BAND_COLORS[i % BAND_COLORS.length];
 				return (
 					<g key={i} opacity={b.enabled ? 1 : 0.35} style={{ cursor: "grab" }}>
 						{selected === i && <circle cx={cx} cy={cy} r={14} fill="none" stroke={C.selected} strokeOpacity={0.7} strokeWidth={2} />}
@@ -168,8 +166,8 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 							cx={cx}
 							cy={cy}
 							r={7}
-							fill={selected === i ? C.selected : color}
-							stroke="#e6f6ff"
+							fill={selected === i ? C.selected : "#ffffff"}
+							stroke="rgba(0,0,0,0.5)"
 							strokeWidth={1.5}
 							onPointerDown={(e) => {
 								e.stopPropagation();

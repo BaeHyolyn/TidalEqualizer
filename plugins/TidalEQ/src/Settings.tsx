@@ -3,7 +3,7 @@ import { LunaSelectItem, LunaSelectSetting, LunaSettings, LunaSwitchSetting, Lun
 import React from "react";
 
 import { defaultSettings, PRESETS, type Band, type BandType, type EqSettings, type Macros, type SmartVolume } from "./eq";
-import { BAND_COLORS, EqGraph } from "./EqGraph";
+import { EqGraph } from "./EqGraph";
 
 export const DEFAULT_MPV = "C:\\Program Files\\MPV Player\\mpv.exe";
 
@@ -35,7 +35,7 @@ const field: React.CSSProperties = {
 	textAlign: "center",
 };
 
-const BandEditor = ({ band, index, onChange }: { band: Band; index: number; onChange: (b: Band) => void }) => {
+export const BandEditor = ({ band, index, onChange }: { band: Band; index: number; onChange: (b: Band) => void }) => {
 	const noGain = band.type === "highpass" || band.type === "lowpass";
 	const item = (label: string, control: React.ReactNode) => (
 		<label style={{ ...cell, alignItems: "stretch", flex: "1 1 90px" }}>
@@ -45,7 +45,7 @@ const BandEditor = ({ band, index, onChange }: { band: Band; index: number; onCh
 	);
 	return (
 		<div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
-			<span style={{ width: 12, height: 12, borderRadius: 6, background: BAND_COLORS[index % BAND_COLORS.length], alignSelf: "center" }} />
+			<span style={{ width: 12, height: 12, borderRadius: 6, background: "#33ffee", alignSelf: "center" }} />
 			{item(
 				"Type",
 				<select value={band.type} onChange={(e) => onChange({ ...band, type: e.target.value as BandType })} style={field}>
@@ -67,12 +67,12 @@ const BandEditor = ({ band, index, onChange }: { band: Band; index: number; onCh
 	);
 };
 
-const MacroSlider = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
+export const MacroSlider = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
 	<div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 220px", minWidth: 0 }}>
 		<span style={{ ...small, opacity: 1, width: 42 }}>{label}</span>
 		<input type="range" min={-12} max={12} step={0.5} value={value} aria-label={label}
 			onChange={(e) => onChange(+e.target.value)} onDoubleClick={() => onChange(0)}
-			style={{ flex: 1, minWidth: 0, accentColor: "#5468ff" }} />
+			style={{ flex: 1, minWidth: 0, accentColor: "#ffffff" }} />
 		<span style={{ ...small, opacity: 1, width: 52, textAlign: "center", background: "rgba(255,255,255,0.06)", borderRadius: 4, padding: "3px 0" }}>
 			{value.toFixed(1)} dB
 		</span>
