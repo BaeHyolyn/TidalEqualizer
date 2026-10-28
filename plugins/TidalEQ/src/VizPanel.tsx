@@ -2,7 +2,7 @@ import React from "react";
 
 import { heading, Pill, text, type Looks } from "./NowPlayingTab";
 import { settings, vizSettings } from "./Settings";
-import { defaultViz, type VizSettings } from "./viz";
+import { coverPixels, defaultViz, MAX_COLOR_POINTS, sampleColors, type VizSettings } from "./viz";
 
 // Controls for the visualizer. Changes are stored right away and the visualizer reads them on its next frame.
 
@@ -50,6 +50,76 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 );
 const Row = ({ children }: { children: React.ReactNode }) => <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px" }}>{children}</div>;
 
+const coverSrc = () => document.querySelector<HTMLImageElement>("[data-test=new-now-playing] [class*=_artworkWrapper_] img")?.src ?? "";
+
+/** The current cover with draggable dots: each dot is where one colour is taken from. Click adds, double-click removes. */
+const ColorPoints = ({ points, set }: { points: [number, number][]; set: (p: [number, number][]) => void }) => {
+	const [src, setSrc] = React.useState(coverSrc);
+	const [pixels, setPixels] = React.useState<Uint8ClampedArray | null>(null);
+	const box = React.useRef<HTMLDivElement>(null);
+	const drag = React.useRef<number | null>(null);
+	// Follow track changes
+	React.useEffect(() => {
+		const t = setInterval(() => setSrc(coverSrc()), 1000);
+		return () => clearInterval(t);
+	}, []);
+	React.useEffect(() => {
+		let live = true;
+		if (src) coverPixels(src).then((p) => live && setPixels(p));
+		return () => void (live = false);
+	}, [src]);
+	const colors = pixels ? sampleColors(pixels, points) : points.map(() => "#fff");
+
+	const at = (e: React.PointerEvent | React.MouseEvent): [number, number] => {
+		const r = box.current!.getBoundingClientRect();
+		const clamp = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 1000) / 1000;
+		return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)];
+	};
+
+	return (
+		<div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+			<div
+				ref={box}
+				style={{ position: "relative", width: 180, height: 180, borderRadius: 4, overflow: "hidden", cursor: "crosshair", touchAction: "none", flexShrink: 0, background: "rgba(255,255,255,0.06)" }}
+				onPointerMove={(e) => drag.current !== null && set(points.map((p, i) => (i === drag.current ? at(e) : p)))}
+				onPointerUp={() => (drag.current = null)}
+				onClick={(e) => e.target === e.currentTarget.firstChild && points.length < MAX_COLOR_POINTS && set([...points, at(e)])}
+			>
+				{src && <img src={src} alt="" draggable={false} style={{ width: "100%", height: "100%", display: "block", userSelect: "none" }} />}
+				{points.map(([x, y], i) => (
+					<span
+						key={i}
+						title="Drag to move, double-click to remove"
+						onPointerDown={(e) => {
+							e.stopPropagation();
+							(e.currentTarget.parentElement as HTMLElement).setPointerCapture(e.pointerId);
+							drag.current = i;
+						}}
+						onDoubleClick={(e) => {
+							e.stopPropagation();
+							if (points.length > 1) set(points.filter((_, j) => j !== i));
+						}}
+						style={{
+							position: "absolute", left: `${x * 100}%`, top: `${y * 100}%`, width: 16, height: 16, margin: -8, borderRadius: 8,
+							background: colors[i], border: "2px solid #fff", boxShadow: "0 0 0 1px rgba(0,0,0,0.5)", cursor: "grab",
+						}}
+					/>
+				))}
+			</div>
+			<div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0, flex: "1 1 200px" }}>
+				<p style={{ ...text, fontSize: 12 }}>
+					Each dot picks a colour from the cover; the ring blends them in order. Drag a dot to move it, click the cover to add one (up to {MAX_COLOR_POINTS}), double-click a dot to remove it.
+				</p>
+				<div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+					{colors.map((c, i) => (
+						<span key={i} style={{ width: 28, height: 28, borderRadius: 6, background: c, boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.25)" }} />
+					))}
+				</div>
+			</div>
+		</div>
+	);
+};
+
 export const VizPanel = ({ looks }: { looks: Looks }) => {
 	const [viz, update] = useViz();
 	const set = <K extends keyof VizSettings>(key: K) => (v: VizSettings[K]) => update({ [key]: v } as Partial<VizSettings>);
@@ -95,8 +165,19 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 
 					<Section title="Color">
 						<Choice looks={looks} label="Colors" options={[["artwork", "From cover"], ["solid", "Solid"], ["gradient", "Gradient"], ["spectrum", "Rainbow"]]} v={viz.colorMode} set={set("colorMode")} />
+						{viz.colorMode === "artwork" && (
+							<>
+								<ColorPoints points={viz.colorPoints} set={set("colorPoints")} />
+								<div>
+									<Pill looks={looks} pressed={false} onClick={() => update({ colorPoints: defaultViz().colorPoints })}>
+										Reset points
+									</Pill>
+								</div>
+							</>
+						)}
+						{(viz.colorMode === "solid" || viz.colorMode === "gradient") && (
 						<div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-							{(["color1", "color2"] as const).map((k, i) => (
+							{(["color1", "color2"] as const).slice(0, viz.colorMode === "solid" ? 1 : 2).map((k, i) => (
 								<label key={k} style={{ display: "flex", gap: 12, alignItems: "center" }}>
 									<span style={{ ...text, color: "#fff", width: 92 }}>{i ? "Color 2" : "Color 1"}</span>
 									<input type="color" value={viz[k]} onChange={(e) => update({ [k]: e.target.value })}
@@ -104,6 +185,7 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 								</label>
 							))}
 						</div>
+						)}
 						<Row>
 							<Slider label="Opacity" min={0.1} max={1} step={0.05} v={viz.opacity} set={set("opacity")} />
 							<Slider label="Glow" min={0} max={40} unit=" px" v={viz.glow} set={set("glow")} />

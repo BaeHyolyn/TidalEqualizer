@@ -24,6 +24,7 @@ export type VizSettings = {
 	colorMode: VizColorMode;
 	color1: string;
 	color2: string;
+	colorPoints: [number, number][]; // where "From cover" picks its colours, as 0..1 positions on the cover
 	opacity: number; // 0..1
 	glow: number; // px
 	sensitivity: number; // dB of headroom: lower = taller bars
@@ -56,6 +57,12 @@ export const defaultViz = (): VizSettings => ({
 	colorMode: "artwork",
 	color1: "#ffffff",
 	color2: "#33ffee",
+	colorPoints: [
+		[0.25, 0.25],
+		[0.75, 0.25],
+		[0.75, 0.75],
+		[0.25, 0.75],
+	],
 	opacity: 0.85,
 	glow: 8,
 	sensitivity: 12,
@@ -172,4 +179,46 @@ export const smoothBars = (
 		out[i] = v;
 	}
 	return out;
+};
+
+export const MAX_COLOR_POINTS = 8;
+const GRID = 64; // the cover is sampled from a 64x64 copy
+
+/** Average colour around each point of a GRID x GRID RGBA image, nudged toward white so it shows on TIDAL's tinted background. */
+export const sampleColors = (pixels: Uint8ClampedArray, points: [number, number][]) =>
+	points.map(([px, py]) => {
+		const cx = Math.round(Math.min(1, Math.max(0, px)) * (GRID - 1));
+		const cy = Math.round(Math.min(1, Math.max(0, py)) * (GRID - 1));
+		let r = 0, g = 0, b = 0, n = 0;
+		for (let y = Math.max(0, cy - 2); y <= Math.min(GRID - 1, cy + 2); y++)
+			for (let x = Math.max(0, cx - 2); x <= Math.min(GRID - 1, cx + 2); x++) {
+				const i = (y * GRID + x) * 4;
+				r += pixels[i];
+				g += pixels[i + 1];
+				b += pixels[i + 2];
+				n++;
+			}
+		const mix = (c: number) => Math.round((c / n) * 0.8 + 255 * 0.2);
+		return `rgb(${mix(r)},${mix(g)},${mix(b)})`;
+	});
+
+const coverCache = new Map<string, Promise<Uint8ClampedArray | null>>();
+/** The cover as GRID x GRID RGBA pixels (fetched, since the <img> itself can't be read across origins), or null. */
+export const coverPixels = (src: string) => {
+	let p = coverCache.get(src);
+	if (!p) {
+		p = fetch(src)
+			.then((r) => r.blob())
+			.then((blob) => createImageBitmap(blob, { resizeWidth: GRID, resizeHeight: GRID, resizeQuality: "medium" }))
+			.then((bitmap) => {
+				const c = new OffscreenCanvas(GRID, GRID);
+				const g = c.getContext("2d")!;
+				g.drawImage(bitmap, 0, 0);
+				return g.getImageData(0, 0, GRID, GRID).data;
+			})
+			.catch(() => null);
+		if (coverCache.size > 20) coverCache.clear();
+		coverCache.set(src, p);
+	}
+	return p;
 };

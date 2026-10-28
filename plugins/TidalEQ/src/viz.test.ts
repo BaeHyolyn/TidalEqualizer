@@ -1,6 +1,6 @@
 import assert from "assert";
 
-import { analyze, bandEdges, bandLevels, FFT_SIZE, PCM_RATE, smoothBars } from "./viz";
+import { analyze, bandEdges, bandLevels, FFT_SIZE, PCM_RATE, sampleColors, smoothBars } from "./viz";
 
 // A full-scale 1 kHz sine peaks at ~0 dB in the 1 kHz bin and is far lower elsewhere
 const n = PCM_RATE;
@@ -32,5 +32,10 @@ smoothBars(state, new Float32Array(8), out, 16, opts);
 assert(risen - state[3] < risen * 0.2, "falls slower than it rose");
 for (let i = 0; i < 200; i++) smoothBars(state, new Float32Array(8), out, 16, opts);
 assert(Math.max(...out) < 0.01, "everything settles back to zero");
+
+// Colour points: left half red, right half blue; each point reads its side (nudged 20% toward white)
+const px = new Uint8ClampedArray(64 * 64 * 4);
+for (let i = 0; i < 64 * 64; i++) px.set(i % 64 < 32 ? [255, 0, 0, 255] : [0, 0, 255, 255], i * 4);
+assert.deepStrictEqual(sampleColors(px, [[0.1, 0.5], [0.9, 0.5], [2, -1]]), ["rgb(255,51,51)", "rgb(51,51,255)", "rgb(51,51,255)"]);
 
 console.log("viz: all tests passed");

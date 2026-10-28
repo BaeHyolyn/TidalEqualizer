@@ -198,14 +198,18 @@ export const addPanelTab = (unloads: Set<LunaUnload>, id: string, label: string,
 	else insertTabs();
 };
 
-// Insert our buttons after Lyrics whenever the now-playing view renders the tab bar
+// TIDAL's own tab buttons (Similar tracks, Credits, Lyrics); which ones show depends on the track (no lyrics, no Lyrics tab)
+const THEIR_TABS = "[data-test=new-now-playing] [data-test^=toggle-]:not([data-test^=toggle-tidaleq])";
+
+// Insert our buttons after TIDAL's last tab whenever the now-playing view renders the tab bar
 const insertTabs = () => {
-	const lyrics = document.querySelector("[data-test=toggle-lyrics]");
-	if (!lyrics?.parentElement) return;
-	const placed = tabs.every((t, i) => t.button.previousElementSibling === (i ? tabs[i - 1].button : lyrics));
+	const theirs = [...document.querySelectorAll(THEIR_TABS)];
+	const last = theirs[theirs.length - 1];
+	if (!last?.parentElement || !credits()) return; // our panels borrow Credits, so they need it
+	const placed = tabs.every((t, i) => t.button.previousElementSibling === (i ? tabs[i - 1].button : last));
 	if (placed) return;
 	// Copy the look of a tab that isn't pressed; a re-rendered tab bar (e.g. on resize) keeps our tab open
-	const plain = [...lyrics.parentElement.querySelectorAll("[data-test^=toggle-][aria-pressed=false]")].find((t) => !tabs.some((x) => x.button === t)) ?? lyrics;
+	const plain = theirs.find((t) => t.getAttribute("aria-pressed") === "false") ?? last;
 	for (const t of tabs) {
 		t.button.className = plain.className;
 		t.button.firstElementChild!.className = plain.firstElementChild?.className ?? "";
@@ -215,11 +219,11 @@ const insertTabs = () => {
 			if (c) setPressed(c, false);
 		}
 	}
-	lyrics.after(...tabs.map((t) => t.button));
+	last.after(...tabs.map((t) => t.button));
 };
 
 const watchNowPlaying = (unloads: Set<LunaUnload>) => {
-	observe(unloads, "[data-test=toggle-lyrics]", insertTabs);
+	observe(unloads, THEIR_TABS, insertTabs);
 	// TIDAL rebuilds the panel on some layout changes (like resizing): take it over again
 	observe<HTMLElement>(unloads, "[data-test=now-playing-credits]", (panel) => tabs.forEach((t) => t.reattach(panel)));
 	// observe only sees changes, so handle a now-playing view that is already open

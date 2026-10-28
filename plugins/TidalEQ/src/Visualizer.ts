@@ -4,7 +4,7 @@ import { MediaItem, PlayState } from "@luna/lib";
 import { responseDb } from "./eq";
 import { getTime, readPcm } from "./player.native";
 import { settings, vizSettings } from "./Settings";
-import { analyze, bandEdges, bandLevels, PCM_RATE, smoothBars, type VizSettings } from "./viz";
+import { analyze, bandEdges, bandLevels, coverPixels, PCM_RATE, sampleColors, smoothBars, type VizSettings } from "./viz";
 
 // Draws the spectrum around TIDAL's now-playing cover on one canvas, in its own animation loop (never through React).
 // Samples come from the silent decoder mpv (readPcm); the position from the playing mpv, extrapolated between polls.
@@ -104,6 +104,9 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	let cover: HTMLElement | null = null;
 	let coverSrc = "";
 	let artColor: string | null = null;
+	let pixels: Uint8ClampedArray | null = null; // the current cover, for the colour points
+	let pointColors: string[] = [];
+	let pointsKey = "";
 	const restoreCover = () => {
 		if (cover) cover.style.scale = "";
 		canvas.style.scale = "";
@@ -177,6 +180,10 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		if (img!.src !== coverSrc) {
 			coverSrc = img!.src;
 			albumColor().then((c) => (artColor = c)).catch(() => (artColor = null));
+			pixels = null;
+			pointsKey = "";
+			const src = coverSrc;
+			coverPixels(src).then((p) => src === coverSrc && (pixels = p));
 		}
 
 		if (now - lastPoll > 100) (lastPoll = now), void pollTime();
@@ -283,6 +290,9 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 
 		// Colours: one paint for the whole frame keeps it to a single draw call
 		const art = artColor ?? v.color1;
+		// Colours from the chosen points on the cover; re-sampled only when the cover or the points change
+		const key = pixels ? JSON.stringify(v.colorPoints) : "";
+		if (key !== pointsKey) (pointsKey = key), (pointColors = pixels && v.colorPoints?.length ? sampleColors(pixels, v.colorPoints) : []);
 		let paint: string | CanvasGradient = v.colorMode === "artwork" ? art : v.color1;
 		if (v.colorMode === "gradient" || v.colorMode === "spectrum" || v.colorMode === "artwork") {
 			const g = ctx.createConicGradient(Math.PI / 2 + turn * 2 * Math.PI, cx, cy);
@@ -290,14 +300,18 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 				v.colorMode === "spectrum"
 					? [0, 60, 120, 180, 240, 300, 360].map((h) => `hsl(${h},90%,60%)`)
 					: v.colorMode === "artwork"
-						? [art, v.color1, art]
+						? pointColors.length
+							? // around the ring and back to the first; mirrored so both sides match
+								v.mirror ? [...pointColors, ...pointColors.slice(0, -1).reverse()] : [...pointColors, pointColors[0]]
+							: [art, v.color1, art]
 						: [v.color1, v.color2, v.color1];
+			if (stops.length < 2) stops.push(stops[0]); // a single colour point
 			stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
 			paint = g;
 		}
 		ctx.globalAlpha = v.opacity;
 		ctx.shadowBlur = v.glow;
-		ctx.shadowColor = v.colorMode === "solid" ? v.color1 : art;
+		ctx.shadowColor = v.colorMode === "solid" ? v.color1 : v.colorMode === "artwork" && pointColors.length ? pointColors[0] : art;
 		ctx.strokeStyle = ctx.fillStyle = paint;
 		ctx.lineCap = v.roundCaps ? "round" : "butt";
 		ctx.lineJoin = "round";
