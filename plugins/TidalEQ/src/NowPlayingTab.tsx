@@ -38,9 +38,9 @@ const Panel = ({ looks }: { looks: Looks }) => {
 	const setMacro = (key: keyof Macros, v: number) => update({ macros: { ...eq.macros, [key]: v } });
 
 	return (
-		// Column flex + auto margins centers the content on the artwork, and still scrolls when it doesn't fit
-		<div style={{ height: "100%", overflowY: "auto", padding: "0 24px", boxSizing: "border-box", color: "#fff", fontFamily: "inherit", display: "flex", flexDirection: "column" }}>
-			<div style={{ margin: "auto 0" }}>
+		// Fills TIDAL's scroll area; column flex + auto margins center it on the artwork when there is room
+		<div style={{ minHeight: "100%", color: "#fff", fontFamily: "inherit", display: "flex", flexDirection: "column" }}>
+			<div style={{ margin: "auto 0", paddingBottom: 48 }}>
 			<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 24 }}>
 				<p style={text}>{eq.enabled ? "Playing through mpv with your equalizer." : "Off: TIDAL plays normally."}</p>
 				<div style={{ display: "flex", gap: 8 }}>
@@ -86,7 +86,7 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 	let active = false;
 	let root: Root | null = null;
 	let host: HTMLElement | null = null;
-	let hiddenContent: HTMLElement | null = null;
+	let hiddenPanel: HTMLElement | null = null;
 	let pressedClasses: string[] = [];
 
 	const button = document.createElement("button");
@@ -104,8 +104,8 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 		root?.unmount();
 		host?.remove();
 		root = host = null;
-		if (hiddenContent) hiddenContent.style.visibility = "";
-		hiddenContent = null;
+		if (hiddenPanel) hiddenPanel.style.display = "";
+		hiddenPanel = null;
 		button.classList.remove(...pressedClasses);
 		button.setAttribute("aria-pressed", "false");
 	};
@@ -121,9 +121,7 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 			await new Promise((r) => setTimeout(r, 25));
 			panel = document.querySelector<HTMLElement>("[data-test=now-playing-credits]");
 		}
-		const content = panel?.parentElement; // the panel's scroll container
-		const wrapper = content?.parentElement;
-		if (!content || !wrapper) return;
+		if (!panel) return;
 
 		// Move the "pressed" look from Credits to our button
 		pressedClasses = [...creditsButton.classList].filter((c) => !button.classList.contains(c));
@@ -132,16 +130,25 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 		button.classList.add(...pressedClasses);
 		button.setAttribute("aria-pressed", "true");
 
-		hiddenContent = content;
-		content.style.visibility = "hidden";
 		host = document.createElement("div");
-		host.style.cssText = "position:absolute;inset:0;z-index:1;";
-		if (getComputedStyle(wrapper).position === "static") wrapper.style.position = "relative";
-		wrapper.appendChild(host);
+		host.style.height = "100%";
+		attach(panel);
 		root = createRoot(host);
 		root.render(<Panel looks={{ button: button.className.split(" ").filter((c) => !pressedClasses.includes(c)).join(" "), pressed: pressedClasses.join(" "), label: button.firstElementChild!.className }} />);
 		active = true;
 	};
+
+	// Our panel lives in the Credits panel's own scroll container (so it gets TIDAL's padding and scrolling at every size)
+	const attach = (panel: HTMLElement) => {
+		if (hiddenPanel && hiddenPanel !== panel) hiddenPanel.style.display = "";
+		hiddenPanel = panel;
+		panel.style.display = "none";
+		if (host && host.parentElement !== panel.parentElement) panel.after(host);
+	};
+	// TIDAL rebuilds the panel on some layout changes (like resizing): take it over again
+	observe<HTMLElement>(unloads, "[data-test=now-playing-credits]", (panel) => {
+		if (active && host) attach(panel);
+	});
 
 	button.addEventListener("click", () => {
 		if (!active) return void open();
@@ -171,10 +178,15 @@ export const addNowPlayingTab = (unloads: Set<LunaUnload>) => {
 	// Insert next to Lyrics whenever the now-playing view renders the tab bar
 	const insert = (lyrics: Element) => {
 		if (button.isConnected && button.parentElement === lyrics.parentElement) return;
-		close();
-		// Copy the look of a tab that isn't pressed
+		// Copy the look of a tab that isn't pressed; a re-rendered tab bar (e.g. on resize) keeps our tab open
 		const plain = [...lyrics.parentElement!.querySelectorAll("[data-test^=toggle-][aria-pressed=false]")].find((t) => t !== button) ?? lyrics;
 		button.className = plain.className;
+		if (active) button.classList.add(...pressedClasses);
+		if (active) {
+			const c = credits();
+			c?.classList.remove(...pressedClasses);
+			c?.setAttribute("aria-pressed", "false");
+		}
 		button.firstElementChild!.className = plain.firstElementChild?.className ?? "";
 		lyrics.after(button);
 	};

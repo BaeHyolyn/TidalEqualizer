@@ -2,13 +2,11 @@ import React from "react";
 
 import { responseDb, type Band, type Macros } from "./eq";
 
-// Drawing space (the SVG scales to the panel width)
-const VW = 1000;
+// Drawing space in CSS pixels; the width follows the panel so text keeps its size in small windows
 const L = 52; // left margin for dB labels
 const R = 12;
 const TOP = 34; // below the region header
 const PH = 236; // plot height
-const PW = VW - L - R;
 const VH = TOP + PH + 30;
 const DB = 12; // plot range: -12..+12 dB
 const F_MIN = 20;
@@ -40,9 +38,7 @@ const FREQ_LABELS: [number, string][] = [
 ];
 const MINOR = [30, 40, 60, 70, 80, 90, 300, 400, 600, 700, 800, 900, 3000, 4000, 6000, 7000, 8000, 9000];
 
-const x = (f: number) => L + (Math.log10(f / F_MIN) / DECADES) * PW;
 const y = (db: number) => TOP + ((DB - db) / (2 * DB)) * PH;
-const fAt = (px: number) => F_MIN * 10 ** ((Math.min(Math.max(px, L), L + PW) - L) / PW * DECADES);
 const dbAt = (py: number) => DB - ((Math.min(Math.max(py, TOP), TOP + PH) - TOP) / PH) * 2 * DB;
 
 const noGain = (b: Band) => b.type === "highpass" || b.type === "lowpass";
@@ -57,6 +53,19 @@ type Props = {
 
 export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) => {
 	const svg = React.useRef<SVGSVGElement>(null);
+	const [VW, setVW] = React.useState(1000);
+	React.useEffect(() => {
+		const el = svg.current;
+		if (!el) return;
+		const ro = new ResizeObserver(([e]) => setVW(Math.max(320, Math.round(e.contentRect.width))));
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, []);
+	const PW = VW - L - R;
+	const x = (f: number) => L + (Math.log10(f / F_MIN) / DECADES) * PW;
+	const fAt = (px: number) => F_MIN * 10 ** ((Math.min(Math.max(px, L), L + PW) - L) / PW * DECADES);
+	// Fewer and shorter labels when narrow so they don't collide
+	const narrow = VW < 600;
 	const drag = React.useRef<number | null>(null);
 	// Latest props for the native wheel listener
 	const latest = React.useRef({ bands, selected, onBand });
@@ -100,7 +109,7 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 			pts.push(`${x(f).toFixed(1)},${y(responseDb({ bands, macros }, f)).toFixed(1)}`);
 		}
 		return `M${pts.join("L")}`;
-	}, [bands, macros]);
+	}, [bands, macros, VW]);
 
 	return (
 		<svg
@@ -129,14 +138,14 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 				<g key={name}>
 					<rect x={x(lo) + 1} y={4} width={x(hi) - x(lo) - 2} height={22} fill={C.header} />
 					<text x={(x(lo) + x(hi)) / 2} y={19} textAnchor="middle" fontSize={10} fill={C.label} letterSpacing={0.5}>
-						{name}
+						{narrow ? name.replace("SUB BASS", "SUB").replace("MID RANGE", "MIDS").replace("UPPER MIDS", "UPPER") : name}
 					</text>
 				</g>
 			))}
 
 			<rect x={L} y={TOP} width={PW} height={PH} fill={C.plot} />
 			{MINOR.map((f) => <line key={f} x1={x(f)} x2={x(f)} y1={TOP} y2={TOP + PH} stroke={C.grid} />)}
-			{FREQ_LABELS.map(([f, label]) => (
+			{FREQ_LABELS.filter(([f]) => !narrow || [20, 100, 1000, 20000].includes(f)).map(([f, label]) => (
 				<g key={f}>
 					<line x1={x(f)} x2={x(f)} y1={TOP} y2={TOP + PH} stroke={C.gridStrong} />
 					<text x={Math.min(Math.max(x(f), L + 16), L + PW - 18)} y={TOP + PH + 18} textAnchor="middle" fontSize={11} fill={C.label}>
