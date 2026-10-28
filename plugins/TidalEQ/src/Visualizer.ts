@@ -101,29 +101,10 @@ const lum = (c: string) => {
 	return (n[0] ?? 0) * 0.3 + (n[1] ?? 0) * 0.59 + (n[2] ?? 0) * 0.11;
 };
 
-/**
- * The 3D transforms between the cover and its wrapper (e.g. a tilt-on-hover plugin), as one CSS transform,
- * so the visualizer tilts with the cover instead of staying flat behind it.
- */
-const tiltOf = (img: HTMLElement, wrapper: HTMLElement) => {
-	const parts: string[] = [];
-	for (let el = img.parentElement; el && el !== wrapper; el = el.parentElement) {
-		const t = getComputedStyle(el).transform;
-		if (!t || t === "none") continue;
-		// Keep only rotation/tilt: any shift is already in the cover's on-screen position
-		const m = new DOMMatrix(t);
-		m.m41 = m.m42 = m.m43 = 0;
-		if (!m.isIdentity) parts.unshift(m.toString());
-		const p = el.parentElement && getComputedStyle(el.parentElement).perspective;
-		if (p && p !== "none") parts.unshift(`perspective(${p})`);
-	}
-	return parts.join(" ");
-};
-
 export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	const canvas = document.createElement("canvas");
-	// Sits right after the cover inside the now-playing view, stacked above it so "Inside" bars show over the cover
-	// (a body-level canvas ends up behind TIDAL's layers). It never covers the side panel: drawing is clipped at its edge.
+	// Mounted inside the cover's box (see the loop), stacked above the image so "Inside" bars show over the cover
+	// It never covers the side panel: drawing is clipped at its edge.
 	canvas.style.cssText = "position:absolute;pointer-events:none;left:0;top:0;z-index:1;";
 	const ctx = canvas.getContext("2d")!;
 	unloads.add(() => canvas.remove());
@@ -139,10 +120,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	// TIDAL's tab bar, player bar and side panel, so the drawing stays clear of them
 	let ui: { panel?: DOMRect; tabs?: DOMRect; player?: DOMRect } = {};
 	let uiAt = 0;
-	let beat = 1; // current cover-beat scale, shared by the cover and the canvas
 	const restoreCover = () => {
 		if (cover) cover.style.scale = "";
-		beat = 1;
 	};
 	unloads.add(restoreCover);
 
@@ -212,16 +191,16 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			restoreCover();
 			return;
 		}
-		const beatTarget = img!.parentElement !== null && img!.parentElement.closest("[class*=_artworkWrapper_]") ? img!.parentElement : img!;
-		if (beatTarget !== cover) restoreCover(), (cover = beatTarget);
-		const wrapper = img!.closest<HTMLElement>("[class*=_artworkWrapper_]")!;
-		const view = wrapper.parentElement!;
-		if (canvas.previousElementSibling !== wrapper) {
-			if (getComputedStyle(view).position === "static") {
-				view.style.position = "relative";
-				unloads.add(() => (view.style.position = ""));
+		// The cover's own box (image, TIDAL's border and glare): it tilts with the mouse and we scale it with the bass.
+		// The canvas lives inside it, so TIDAL moves, tilts and scales cover and bars as one piece.
+		const coverBox = img!.parentElement?.closest("[class*=_artworkWrapper_]") ? img!.parentElement! : img!;
+		if (coverBox !== cover) restoreCover(), (cover = coverBox);
+		if (canvas.parentElement !== coverBox) {
+			if (getComputedStyle(coverBox).position === "static") {
+				coverBox.style.position = "relative";
+				unloads.add(() => (coverBox.style.position = ""));
 			}
-			wrapper.after(canvas);
+			coverBox.appendChild(canvas); // last, so it sits above the image and the glare
 		}
 		if (coverImageSrc(img) !== coverSrc) {
 			coverSrc = coverImageSrc(img);
@@ -255,20 +234,19 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		smoothBars(state, target, shown, dt, v);
 		for (let b = 0; b < bands; b++) peaks[b] = Math.max(shown[b], peaks[b] - dt / 1500);
 
-		draw(v, rect!, view.getBoundingClientRect(), bands, now, tiltOf(img!, wrapper));
+		draw(v, rect!, img!, bands, now);
 
 		// The cover beats with the bass (first ~15% of the bands)
 		if (v.pulse > 0) {
 			let bass = 0;
 			const n = Math.max(1, Math.round(bands * 0.15));
 			for (let b = 0; b < n; b++) bass += shown[b];
-			// The bars grow with it (applied in draw, around the cover's centre) so the cover never covers them
-			beat = 1 + (bass / n) * v.pulse * 0.06;
-			cover!.style.scale = String(beat);
+			// The canvas is inside the scaled box, so the bars grow with the cover
+			cover!.style.scale = String(1 + (bass / n) * v.pulse * 0.06);
 		} else restoreCover();
 	};
 
-	const draw = (v: VizSettings, rect: DOMRect, origin: DOMRect, bands: number, now: number, tilt: string) => {
+	const draw = (v: VizSettings, rect: DOMRect, img: HTMLElement, bands: number, now: number) => {
 		// Room around the cover for the longest bar and its glow; a circle also reaches past the cover's corners
 		const corner = v.shape === "circle" ? (Math.hypot(rect.width, rect.height) - Math.max(rect.width, rect.height)) / 2 : 0;
 		const margin = Math.max(0, v.gap) + v.length + v.glow * 2 + 8 + corner;
@@ -281,10 +259,9 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			canvas.style.width = `${W}px`;
 			canvas.style.height = `${H}px`;
 		} else ctx.clearRect(0, 0, canvas.width, canvas.height);
-		// Placed with left/top, not a translate: a scale in the same transform would also scale the offset and push it aside
-		canvas.style.left = `${Math.round(rect.left - origin.left - margin)}px`;
-		canvas.style.top = `${Math.round(rect.top - origin.top - margin)}px`;
-		canvas.style.transform = `${tilt} scale(${beat})`;
+		// Around the image, in the cover box's own coordinates: no copied transforms, nothing to drift
+		canvas.style.left = `${img.offsetLeft - margin}px`;
+		canvas.style.top = `${img.offsetTop - margin}px`;
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		// Stay clear of TIDAL's own UI: an open side panel (Lyrics, Credits, our tabs), the tab bar above and the player below
 		const left = rect.left - margin;
