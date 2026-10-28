@@ -98,11 +98,18 @@ const stop = async () => {
 	setOriginalVolume(tidalVolume());
 };
 
+// Dragging a band fires many changes per second; mpv rebuilds its filters on each one, so apply the last one only
+const APPLY_DELAY_MS = 120;
+let applyTimer: ReturnType<typeof setTimeout> | undefined;
 setEqChangeHandler(() => {
 	if (settings.enabled && !running) return void start();
 	if (!settings.enabled && running) return void stop();
-	if (running) setChain(buildChain(settings)).catch((err) => trace.warn("could not apply equalizer", err));
+	clearTimeout(applyTimer);
+	applyTimer = setTimeout(() => {
+		if (running) setChain(buildChain(settings)).catch((err) => trace.warn("could not apply equalizer", err));
+	}, APPLY_DELAY_MS);
 });
+unloads.add(() => clearTimeout(applyTimer));
 
 // TIDAL re-sends its volume to its own player when the slider moves; mute it again right away
 redux.intercept("playbackControls/SET_VOLUME", unloads, () => {

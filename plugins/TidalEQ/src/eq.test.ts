@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { bandFilter, buildChain, defaultSettings, flatBands, PRESETS, type EqSettings } from "./eq";
+import { bandFilter, bandResponseDb, buildChain, defaultSettings, flatBands, PRESETS, responseDb, type EqSettings } from "./eq";
 
 // Flat with the limiter off does nothing at all
 assert.equal(buildChain({ ...defaultSettings(), limiter: false }), "");
@@ -36,6 +36,26 @@ for (const [key, p] of Object.entries(PRESETS)) {
 	assert.ok(p.preamp <= -Math.max(0, ...bands.map((b) => b.gain)) + 0.5, `${key} preamp must cover its biggest boost`);
 }
 assert.equal(flatBands().every((b) => b.gain === 0), true);
+
+// Curve math: what the graph draws must match what each filter does
+const near = (a: number, b: number, tol = 0.15) => Math.abs(a - b) <= tol;
+const peak = { enabled: true, type: "peaking", freq: 1000, gain: 6, q: 1 } as const;
+assert.ok(near(bandResponseDb(peak, 1000), 6), "peak hits its gain at its center");
+assert.ok(Math.abs(bandResponseDb(peak, 50)) < 0.3 && Math.abs(bandResponseDb(peak, 15000)) < 0.3, "and leaves far frequencies alone");
+const hp = { enabled: true, type: "highpass", freq: 100, gain: 0, q: 0.707 } as const;
+assert.ok(near(bandResponseDb(hp, 100), -3, 0.2), "high-pass is -3 dB at its corner");
+assert.ok(bandResponseDb(hp, 25) < -20 && Math.abs(bandResponseDb(hp, 2000)) < 0.1);
+const ls = { enabled: true, type: "lowshelf", freq: 120, gain: 6, q: 0.7 } as const;
+assert.ok(near(bandResponseDb(ls, 25), 6, 0.3) && Math.abs(bandResponseDb(ls, 5000)) < 0.1, "low shelf lifts the lows only");
+const hs = { enabled: true, type: "highshelf", freq: 8000, gain: -4, q: 0.7 } as const;
+assert.ok(near(bandResponseDb(hs, 19000), -4, 0.5) && Math.abs(bandResponseDb(hs, 200)) < 0.1, "high shelf moves the highs only");
+assert.equal(bandResponseDb({ ...peak, enabled: false }, 1000), 0);
+// Flat is flat; macros add on top of the bands
+assert.ok(Math.abs(responseDb(defaultSettings(), 1234)) < 1e-9);
+assert.ok(responseDb({ bands: flatBands(), macros: { bass: 6, voice: 0, treble: 0 } }, 30) > 5);
+assert.ok(responseDb({ bands: flatBands(), macros: { bass: 0, voice: 4, treble: 0 } }, 1500) > 3.5);
+// Macros reach the chain
+assert.ok(buildChain({ ...defaultSettings(), macros: { bass: 3, voice: 0, treble: -2 } }).includes("lowshelf=f=120:t=q:w=0.7:g=3"));
 
 // The chains are valid for the real mpv, when it is installed
 const MPV = "C:\\Program Files\\MPV Player\\mpv.exe";

@@ -5,10 +5,13 @@ export type SmartVolume = "off" | "quiet" | "balanced" | "loud";
 
 export type Band = { enabled: boolean; type: BandType; freq: number; gain: number; q: number };
 
+export type Macros = { bass: number; voice: number; treble: number };
+
 export type EqSettings = {
 	enabled: boolean;
 	preamp: number; // dB, applied before the bands so boosts have headroom
 	bands: Band[];
+	macros: Macros; // broad Bass / Voice / Treble controls on top of the bands
 	smartVolume: SmartVolume;
 	limiter: boolean;
 };
@@ -17,7 +20,21 @@ export const BAND_FREQS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
 export const flatBands = (): Band[] => BAND_FREQS.map((freq) => ({ enabled: true, type: "peaking", freq, gain: 0, q: 1 }));
 
-export const defaultSettings = (): EqSettings => ({ enabled: true, preamp: 0, bands: flatBands(), smartVolume: "off", limiter: true });
+export const defaultSettings = (): EqSettings => ({
+	enabled: true,
+	preamp: 0,
+	bands: flatBands(),
+	macros: { bass: 0, voice: 0, treble: 0 },
+	smartVolume: "off",
+	limiter: true,
+});
+
+/** The three broad controls, as regular bands so they share the filter and the curve math. */
+export const macroBands = (m: Macros): Band[] => [
+	{ enabled: true, type: "lowshelf", freq: 120, gain: m.bass, q: 0.7 },
+	{ enabled: true, type: "peaking", freq: 1500, gain: m.voice, q: 0.8 },
+	{ enabled: true, type: "highshelf", freq: 8000, gain: m.treble, q: 0.7 },
+];
 
 const withGains = (gains: number[]): Band[] => flatBands().map((b, i) => ({ ...b, gain: gains[i] ?? 0 }));
 
@@ -60,13 +77,64 @@ export const bandFilter = (band: Band): string | undefined => {
 	return `${LAVFI_NAME[type]}=f=${num(freq, 0)}:t=q:w=${num(q)}:g=${num(gain, 1)}`;
 };
 
+/**
+ * Gain in dB that one band applies at `freq`, using the same biquad formulas as FFmpeg's filters
+ * (RBJ Audio EQ Cookbook), so the drawn curve is what mpv actually plays.
+ */
+export const bandResponseDb = (band: Band, freq: number, sampleRate = 48000): number => {
+	if (!band.enabled) return 0;
+	const f0 = clamp(band.freq, 20, 20000, 1000);
+	const q = clamp(band.q, 0.1, 10, 1);
+	const g = clamp(band.gain, -24, 24, 0);
+	const A = 10 ** (g / 40);
+	const w0 = (2 * Math.PI * f0) / sampleRate;
+	const cw = Math.cos(w0);
+	const alpha = Math.sin(w0) / (2 * q);
+	const sA = 2 * Math.sqrt(A) * alpha;
+	let b: number[];
+	let a: number[];
+	switch (band.type) {
+		case "lowshelf":
+			b = [A * (A + 1 - (A - 1) * cw + sA), 2 * A * (A - 1 - (A + 1) * cw), A * (A + 1 - (A - 1) * cw - sA)];
+			a = [A + 1 + (A - 1) * cw + sA, -2 * (A - 1 + (A + 1) * cw), A + 1 + (A - 1) * cw - sA];
+			break;
+		case "highshelf":
+			b = [A * (A + 1 + (A - 1) * cw + sA), -2 * A * (A - 1 + (A + 1) * cw), A * (A + 1 + (A - 1) * cw - sA)];
+			a = [A + 1 - (A - 1) * cw + sA, 2 * (A - 1 - (A + 1) * cw), A + 1 - (A - 1) * cw - sA];
+			break;
+		case "highpass":
+			b = [(1 + cw) / 2, -(1 + cw), (1 + cw) / 2];
+			a = [1 + alpha, -2 * cw, 1 - alpha];
+			break;
+		case "lowpass":
+			b = [(1 - cw) / 2, 1 - cw, (1 - cw) / 2];
+			a = [1 + alpha, -2 * cw, 1 - alpha];
+			break;
+		default:
+			if (g === 0) return 0;
+			b = [1 + alpha * A, -2 * cw, 1 - alpha * A];
+			a = [1 + alpha / A, -2 * cw, 1 - alpha / A];
+	}
+	const w = (2 * Math.PI * freq) / sampleRate;
+	const mag = (c: number[]) => {
+		const re = c[0] + c[1] * Math.cos(w) + c[2] * Math.cos(2 * w);
+		const im = -(c[1] * Math.sin(w) + c[2] * Math.sin(2 * w));
+		return Math.hypot(re, im);
+	};
+	return 20 * Math.log10(mag(b) / mag(a));
+};
+
+/** Total gain in dB at `freq`: every band plus the Bass / Voice / Treble controls (preamp left out). */
+export const responseDb = (s: Pick<EqSettings, "bands" | "macros">, freq: number): number =>
+	[...s.bands, ...macroBands(s.macros)].reduce((sum, band) => sum + bandResponseDb(band, freq), 0);
+
 /** The value for mpv's `af` property, or "" for no processing at all. */
 export const buildChain = (s: EqSettings): string => {
 	if (!s.enabled) return "";
 	const filters: string[] = [];
 	const preamp = clamp(s.preamp, -24, 24, 0);
 	if (preamp !== 0) filters.push(`volume=${num(preamp, 1)}dB`);
-	for (const band of s.bands) {
+	for (const band of [...s.bands, ...macroBands(s.macros ?? { bass: 0, voice: 0, treble: 0 })]) {
 		const f = bandFilter(band);
 		if (f) filters.push(f);
 	}

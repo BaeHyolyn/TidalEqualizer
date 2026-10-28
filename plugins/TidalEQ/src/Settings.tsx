@@ -2,7 +2,8 @@ import { ReactiveStore } from "@luna/core";
 import { LunaSelectItem, LunaSelectSetting, LunaSettings, LunaSwitchSetting, LunaTextSetting } from "@luna/ui";
 import React from "react";
 
-import { defaultSettings, PRESETS, type Band, type BandType, type EqSettings, type SmartVolume } from "./eq";
+import { defaultSettings, PRESETS, type Band, type BandType, type EqSettings, type Macros, type SmartVolume } from "./eq";
+import { BAND_COLORS, EqGraph } from "./EqGraph";
 
 export const DEFAULT_MPV = "C:\\Program Files\\MPV Player\\mpv.exe";
 
@@ -12,8 +13,6 @@ export const settings = await ReactiveStore.getPluginStorage("TidalEQ", { ...def
 let onEqChange: () => void = () => {};
 export const setEqChangeHandler = (fn: () => void) => (onEqChange = fn);
 
-const fmtFreq = (f: number) => (f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : `${Math.round(f)}`);
-const fmtGain = (g: number) => `${g > 0 ? "+" : ""}${g.toFixed(1)}`;
 
 const BAND_TYPES: [BandType, string][] = [
 	["peaking", "Peak"],
@@ -36,57 +35,63 @@ const field: React.CSSProperties = {
 	textAlign: "center",
 };
 
-const BandControl = ({ band, advanced, onChange }: { band: Band; advanced: boolean; onChange: (b: Band) => void }) => {
+const BandEditor = ({ band, index, onChange }: { band: Band; index: number; onChange: (b: Band) => void }) => {
 	const noGain = band.type === "highpass" || band.type === "lowpass";
+	const item = (label: string, control: React.ReactNode) => (
+		<label style={{ ...cell, alignItems: "stretch", flex: "1 1 90px" }}>
+			<span style={small}>{label}</span>
+			{control}
+		</label>
+	);
 	return (
-		<div style={{ ...cell, opacity: band.enabled ? 1 : 0.4 }}>
-			<span style={small}>{noGain ? "—" : fmtGain(band.gain)}</span>
-			<input
-				type="range"
-				min={-12}
-				max={12}
-				step={0.5}
-				value={noGain ? 0 : band.gain}
-				disabled={noGain || !band.enabled}
-				aria-label={`${fmtFreq(band.freq)} Hz`}
-				onChange={(e) => onChange({ ...band, gain: +e.target.value })}
-				onDoubleClick={() => onChange({ ...band, gain: 0 })}
-				style={{ writingMode: "vertical-lr", direction: "rtl", height: 140, width: 24, accentColor: "#3fd0b4" }}
-			/>
-			<span style={{ ...small, opacity: 1, fontWeight: 600 }}>{fmtFreq(band.freq)}</span>
-			{advanced && (
-				<>
-					<select value={band.type} onChange={(e) => onChange({ ...band, type: e.target.value as BandType })} style={field}>
-						{BAND_TYPES.map(([v, label]) => (
-							<option key={v} value={v} style={{ color: "black" }}>
-								{label}
-							</option>
-						))}
-					</select>
-					<input type="number" min={20} max={20000} value={band.freq} title="Hz" style={field}
-						onChange={(e) => onChange({ ...band, freq: +e.target.value })} />
-					<input type="number" min={0.1} max={10} step={0.1} value={band.q} title="Q" style={field}
-						onChange={(e) => onChange({ ...band, q: +e.target.value })} />
-					<label style={{ ...small, display: "flex", gap: 3, alignItems: "center" }}>
-						<input type="checkbox" checked={band.enabled} onChange={(e) => onChange({ ...band, enabled: e.target.checked })} />
-						on
-					</label>
-				</>
+		<div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
+			<span style={{ width: 12, height: 12, borderRadius: 6, background: BAND_COLORS[index % BAND_COLORS.length], alignSelf: "center" }} />
+			{item(
+				"Type",
+				<select value={band.type} onChange={(e) => onChange({ ...band, type: e.target.value as BandType })} style={field}>
+					{BAND_TYPES.map(([v, label]) => (
+						<option key={v} value={v} style={{ color: "black" }}>
+							{label}
+						</option>
+					))}
+				</select>,
 			)}
+			{item("Frequency (Hz)", <input type="number" min={20} max={20000} value={band.freq} style={field} onChange={(e) => onChange({ ...band, freq: +e.target.value })} />)}
+			{item("Gain (dB)", <input type="number" min={-12} max={12} step={0.5} value={band.gain} disabled={noGain} style={field} onChange={(e) => onChange({ ...band, gain: +e.target.value })} />)}
+			{item("Q (width)", <input type="number" min={0.1} max={10} step={0.1} value={band.q} style={field} onChange={(e) => onChange({ ...band, q: +e.target.value })} />)}
+			<label style={{ ...small, display: "flex", gap: 4, alignItems: "center", opacity: 1 }}>
+				<input type="checkbox" checked={band.enabled} onChange={(e) => onChange({ ...band, enabled: e.target.checked })} />
+				On
+			</label>
 		</div>
 	);
 };
+
+const MacroSlider = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
+	<div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 220px", minWidth: 0 }}>
+		<span style={{ ...small, opacity: 1, width: 42 }}>{label}</span>
+		<input type="range" min={-12} max={12} step={0.5} value={value} aria-label={label}
+			onChange={(e) => onChange(+e.target.value)} onDoubleClick={() => onChange(0)}
+			style={{ flex: 1, minWidth: 0, accentColor: "#5468ff" }} />
+		<span style={{ ...small, opacity: 1, width: 52, textAlign: "center", background: "rgba(255,255,255,0.06)", borderRadius: 4, padding: "3px 0" }}>
+			{value.toFixed(1)} dB
+		</span>
+	</div>
+);
 
 export const Settings = () => {
 	const [eq, setEq] = React.useState<EqSettings>({
 		enabled: settings.enabled,
 		preamp: settings.preamp,
 		bands: settings.bands.map((b) => ({ ...b })),
+		macros: { ...settings.macros },
 		smartVolume: settings.smartVolume,
 		limiter: settings.limiter,
 	});
 	const [mpvPath, setMpvPath] = React.useState(settings.mpvPath);
-	const [advanced, setAdvanced] = React.useState(false);
+	const [selected, setSelected] = React.useState<number | null>(null);
+	const setBand = (i: number, b: Band) => update({ bands: eq.bands.map((x, j) => (j === i ? b : x)) });
+	const setMacro = (key: keyof Macros, v: number) => update({ macros: { ...eq.macros, [key]: v } });
 
 	const update = (next: Partial<EqSettings>) => {
 		const merged = { ...eq, ...next };
@@ -125,23 +130,25 @@ export const Settings = () => {
 
 			<div style={{ padding: "8px 0" }}>
 				<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-					<span style={{ fontWeight: 600 }}>Bands (dB)</span>
-					<span style={{ display: "flex", gap: 12 }}>
-						<button type="button" onClick={() => update({ bands: PRESETS.flat.bands() })} style={{ ...field, width: "auto", padding: "4px 10px" }}>
-							Reset
-						</button>
-						<button type="button" onClick={() => setAdvanced(!advanced)} style={{ ...field, width: "auto", padding: "4px 10px" }}>
-							{advanced ? "Simple" : "Advanced"}
-						</button>
-					</span>
+					<span style={{ fontWeight: 600 }}>Bands</span>
+					<button type="button" onClick={() => update({ bands: PRESETS.flat.bands(), macros: { bass: 0, voice: 0, treble: 0 } })}
+						style={{ ...field, width: "auto", padding: "4px 10px" }}>
+						Reset
+					</button>
 				</div>
-				<div style={{ display: "grid", gridTemplateColumns: "repeat(10, minmax(0, 1fr))", gap: 6 }}>
-					{eq.bands.map((band, i) => (
-						<BandControl key={i} band={band} advanced={advanced}
-							onChange={(b) => update({ bands: eq.bands.map((x, j) => (j === i ? b : x)) })} />
-					))}
+				<EqGraph bands={eq.bands} macros={eq.macros} selected={selected} onSelect={setSelected} onBand={setBand} />
+				<div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 12 }}>
+					<MacroSlider label="Bass" value={eq.macros.bass} onChange={(v) => setMacro("bass", v)} />
+					<MacroSlider label="Voice" value={eq.macros.voice} onChange={(v) => setMacro("voice", v)} />
+					<MacroSlider label="Treble" value={eq.macros.treble} onChange={(v) => setMacro("treble", v)} />
 				</div>
-				<p style={{ ...small, marginTop: 8 }}>Double-click a slider to reset it to 0.</p>
+				{selected !== null && eq.bands[selected] ? (
+					<BandEditor band={eq.bands[selected]} index={selected} onChange={(b) => setBand(selected, b)} />
+				) : (
+					<p style={{ ...small, marginTop: 10 }}>
+						Drag a dot to move a band (left/right = frequency, up/down = gain). Scroll on a selected dot to change its width. Double-click resets it to 0 dB.
+					</p>
+				)}
 			</div>
 
 			<LunaSelectSetting
