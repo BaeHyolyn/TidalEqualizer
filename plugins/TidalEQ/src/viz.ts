@@ -38,6 +38,7 @@ export type VizSettings = {
 	peaks: boolean;
 	layers: number; // "layers" style: how many stacked waves, each a step behind and bigger than the one inside it
 	particles: boolean; // sparks drifting out from the ring, more with the bass
+	roundCover: boolean; // show the cover as a circle, with the ring hugging it
 	pulse: number; // 0..1 how much the cover beats with the bass
 	minFreq: number;
 	maxFreq: number;
@@ -80,6 +81,7 @@ export const defaultViz = (): VizSettings => ({
 	peaks: false,
 	layers: 7,
 	particles: false,
+	roundCover: false,
 	pulse: 0.3,
 	minFreq: 40,
 	maxFreq: 10000,
@@ -365,7 +367,7 @@ export const VIZ_PRESETS: Record<string, { label: string; viz: Partial<VizSettin
 	pearls: { label: "Pearls", viz: { style: "dots", bars: 72, length: 40, glow: 10, width: 0.7 } },
 	rainbowLayers: {
 		label: "Rainbow layers",
-		viz: { style: "layers", shape: "circle", mirror: true, rotation: 180, colorMode: "spectrum", layers: 7, bars: 96, length: 130, gap: 0, glow: 12, smoothing: 0.6, decay: 260, particles: true, pulse: 0.35, sensitivity: 14 },
+		viz: { style: "layers", shape: "circle", roundCover: true, mirror: true, rotation: 180, colorMode: "spectrum", layers: 7, bars: 96, length: 130, gap: 0, glow: 12, smoothing: 0.6, decay: 260, particles: true, pulse: 0.35, sensitivity: 14 },
 	},
 	inner: { label: "Inner glow", viz: { placement: "inside", bars: 128, length: 60, opacity: 0.6, glow: 16, width: 0.4 } },
 };

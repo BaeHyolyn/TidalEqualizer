@@ -329,7 +329,7 @@ const Share = ({ viz, update }: { viz: VizSettings; update: Update }) => {
 };
 
 const SECTIONS: Record<string, Key[]> = {
-	Look: ["style", "shape", "placement", "mirror", "roundCaps", "peaks", "layers", "particles"],
+	Look: ["style", "roundCover", "shape", "placement", "mirror", "roundCaps", "peaks", "layers", "particles"],
 	Size: ["bars", "width", "length", "gap"],
 	Color: ["colorMode", "color1", "color2", "colorPoints", "autoColors", "colorCount", "opacity", "glow"],
 	Motion: ["rotation", "spin", "pulse", "smoothing", "attack", "decay"],
@@ -392,6 +392,7 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 
 					<Section title="Look" keys={SECTIONS.Look} {...p}>
 						<Choice looks={looks} {...p} k="style" name="Style" options={[["bars", "Bars"], ["wave", "Wave"], ["dots", "Dots"], ["layers", "Layers"]]} />
+						<Choice looks={looks} {...p} k="roundCover" name="Round cover" options={onOff} />
 						<Choice looks={looks} {...p} k="shape" name="Shape" options={[["square", "Follow cover"], ["circle", "Circle"]]} />
 						<Choice looks={looks} {...p} k="placement" name="Placement" options={[["outside", "Outside"], ["inside", "Inside"], ["both", "Both ways"]]} />
 						<Choice looks={looks} {...p} k="mirror" name="Mirror" options={onOff} />

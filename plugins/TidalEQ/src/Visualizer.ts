@@ -162,8 +162,14 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	// TIDAL's tab bar, player bar and side panel, so the drawing stays clear of them
 	let ui: { panel?: DOMRect; tabs?: DOMRect; player?: DOMRect } = {};
 	let uiAt = 0;
+	// Round cover: one class on the cover's box rounds the image, TIDAL's 1px border (::after) and its glare together
+	const roundStyle = document.createElement("style");
+	roundStyle.textContent = `.tidaleq-round > :is(img, video, [class*=_glare_]), .tidaleq-round::after { border-radius: 50% !important; }`;
+	document.head.appendChild(roundStyle);
+	unloads.add(() => roundStyle.remove());
 	const restoreCover = () => {
 		if (cover) cover.style.scale = "";
+		cover?.classList.remove("tidaleq-round");
 	};
 	unloads.add(restoreCover);
 
@@ -244,6 +250,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			}
 			coverBox.appendChild(canvas); // last, so it sits above the image and the glare
 		}
+		coverBox.classList.toggle("tidaleq-round", v.roundCover);
 		if (coverImageSrc(img) !== coverSrc) {
 			coverSrc = coverImageSrc(img);
 			const src = coverSrc;
@@ -299,7 +306,10 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 
 	const draw = (v: VizSettings, rect: DOMRect, img: HTMLElement, bands: number, now: number) => {
 		// Room around the cover for the longest bar and its glow; a circle also reaches past the cover's corners
-		const corner = v.shape === "circle" ? (Math.hypot(rect.width, rect.height) - Math.max(rect.width, rect.height)) / 2 : 0;
+		// A round cover makes every outline a circle hugging it; a circle around a square cover goes round its corners
+		const circular = v.shape === "circle" || v.roundCover;
+		const coverRadius = v.roundCover ? Math.max(rect.width, rect.height) / 2 : Math.hypot(rect.width, rect.height) / 2;
+		const corner = circular ? coverRadius - Math.max(rect.width, rect.height) / 2 : 0;
 		const reach = v.style === "layers" ? v.length * layerScale(v.layers - 1) + v.layers * 2 : v.length;
 		const margin = Math.max(0, v.gap) + reach + v.glow * 2 + 8 + corner + (v.particles ? PARTICLE_RANGE : 0);
 		const dpr = window.devicePixelRatio || 1;
@@ -341,9 +351,9 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const cy = H / 2;
 		const hw = rect.width / 2 + v.gap;
 		const hh = rect.height / 2 + v.gap;
-		const radius = Math.hypot(rect.width, rect.height) / 2 + v.gap;
+		const radius = coverRadius + v.gap;
 		const n = v.mirror ? bands * 2 : bands;
-		const perimeter = v.shape === "circle" ? 2 * Math.PI * radius : 4 * (hw + hh);
+		const perimeter = circular ? 2 * Math.PI * radius : 4 * (hw + hh);
 		const slot = perimeter / n;
 		// Bar thickness follows the slot, capped so a low bar count doesn't turn into blobs
 		const thick = Math.min(40, Math.max(1, slot * v.width));
@@ -360,7 +370,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		];
 		const at = (f: number): [number, number, number, number] => {
 			f = ((f % 1) + 1) % 1;
-			if (v.shape === "circle") {
+			if (circular) {
 				const a = Math.PI / 2 + f * 2 * Math.PI;
 				return [cx + Math.cos(a) * radius, cy + Math.sin(a) * radius, Math.cos(a), Math.sin(a)];
 			}
@@ -442,7 +452,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		// The ring's base outline, to fill only around the cover and never over it (even-odd)
 		const withOutline = (path: Path2D) => {
 			const band = new Path2D(path);
-			if (v.shape === "circle") band.moveTo(cx + radius, cy), band.arc(cx, cy, radius, 0, 2 * Math.PI);
+			if (circular) band.moveTo(cx + radius, cy), band.arc(cx, cy, radius, 0, 2 * Math.PI);
 			else band.rect(cx - hw, cy - hh, hw * 2, hh * 2);
 			return band;
 		};
@@ -504,7 +514,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		if (v.particles && liveParticles) {
 			ctx.shadowBlur = 0;
 			ctx.fillStyle = "#ffffff";
-			const base = v.shape === "circle" ? radius : Math.max(hw, hh);
+			const base = circular ? radius : Math.max(hw, hh);
 			for (let p = 0; p < liveParticles; p++) {
 				const o = p * 5;
 				const r = base + particles[o + 1];

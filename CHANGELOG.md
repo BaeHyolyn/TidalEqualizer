@@ -5,7 +5,8 @@
 ### Visualizer
 - New **Layers** style: stacked waves, each one a step behind and bigger than the one inside it, in rainbow, cover, gradient or solid colors.
 - **Particles:** sparks drifting out from the ring, more on bass hits (works with every style).
-- New **Rainbow layers** preset putting both together.
+- **Round cover:** shows the cover as a circle; the ring then hugs it instead of going round its corners.
+- New **Rainbow layers** preset putting it all together (layers, particles, round cover).
 
 ### Improved
 - The visualizer only downloads and decodes a track once its cover is on screen, so tracks nobody looks at cost nothing.
