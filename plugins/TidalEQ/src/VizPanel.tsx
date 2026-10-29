@@ -329,7 +329,7 @@ const Share = ({ viz, update }: { viz: VizSettings; update: Update }) => {
 };
 
 const SECTIONS: Record<string, Key[]> = {
-	Look: ["style", "shape", "placement", "mirror", "roundCaps", "peaks"],
+	Look: ["style", "shape", "placement", "mirror", "roundCaps", "peaks", "layers", "particles"],
 	Size: ["bars", "width", "length", "gap"],
 	Color: ["colorMode", "color1", "color2", "colorPoints", "autoColors", "colorCount", "opacity", "glow"],
 	Motion: ["rotation", "spin", "pulse", "smoothing", "attack", "decay"],
@@ -391,18 +391,24 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 					</section>
 
 					<Section title="Look" keys={SECTIONS.Look} {...p}>
-						<Choice looks={looks} {...p} k="style" name="Style" options={[["bars", "Bars"], ["wave", "Wave"], ["dots", "Dots"]]} />
+						<Choice looks={looks} {...p} k="style" name="Style" options={[["bars", "Bars"], ["wave", "Wave"], ["dots", "Dots"], ["layers", "Layers"]]} />
 						<Choice looks={looks} {...p} k="shape" name="Shape" options={[["square", "Follow cover"], ["circle", "Circle"]]} />
 						<Choice looks={looks} {...p} k="placement" name="Placement" options={[["outside", "Outside"], ["inside", "Inside"], ["both", "Both ways"]]} />
 						<Choice looks={looks} {...p} k="mirror" name="Mirror" options={onOff} />
 						{viz.style === "bars" && <Choice looks={looks} {...p} k="roundCaps" name="Round ends" options={onOff} />}
-						{viz.style !== "wave" && <Choice looks={looks} {...p} k="peaks" name="Peaks" options={onOff} />}
+						{(viz.style === "bars" || viz.style === "dots") && <Choice looks={looks} {...p} k="peaks" name="Peaks" options={onOff} />}
+						{viz.style === "layers" && (
+							<Row>
+								<Slider {...p} k="layers" name="Layers" />
+							</Row>
+						)}
+						<Choice looks={looks} {...p} k="particles" name="Particles" options={onOff} />
 					</Section>
 
 					<Section title="Size" keys={SECTIONS.Size} {...p}>
 						<Row>
-							<Slider {...p} k="bars" name={viz.style === "wave" ? "Detail" : viz.style === "dots" ? "Dots" : "Bars"} />
-							<Slider {...p} k="width" name={widthName} />
+							<Slider {...p} k="bars" name={viz.style === "wave" || viz.style === "layers" ? "Detail" : viz.style === "dots" ? "Dots" : "Bars"} />
+							{viz.style !== "layers" && <Slider {...p} k="width" name={widthName} />}
 						</Row>
 						<Row>
 							<Slider {...p} k="length" name="Height" unit=" px" />

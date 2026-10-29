@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Visualizer
+- New **Layers** style: stacked waves, each one a step behind and bigger than the one inside it, in rainbow, cover, gradient or solid colors.
+- **Particles:** sparks drifting out from the ring, more on bass hits (works with every style).
+- New **Rainbow layers** preset putting both together.
+
 ### Improved
 - The visualizer only downloads and decodes a track once its cover is on screen, so tracks nobody looks at cost nothing.
 - Long tracks (DJ mixes, hours long) no longer pile up in memory: past 400 MB the download is passed straight through instead of kept.

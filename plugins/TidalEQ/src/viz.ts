@@ -4,7 +4,7 @@ export const PCM_RATE = 22050; // decoded mono rate: covers up to ~11 kHz, plent
 export const FFT_SIZE = 2048; // ~93 ms window at 22050 Hz
 
 export type VizShape = "square" | "circle";
-export type VizStyle = "bars" | "wave" | "dots";
+export type VizStyle = "bars" | "wave" | "dots" | "layers";
 export type VizPlacement = "outside" | "inside" | "both";
 export type VizColorMode = "artwork" | "solid" | "gradient" | "spectrum";
 
@@ -36,6 +36,8 @@ export type VizSettings = {
 	decay: number; // ms to fall
 	smoothing: number; // 0..1 neighbour smoothing (Monstercat style)
 	peaks: boolean;
+	layers: number; // "layers" style: how many stacked waves, each a step behind and bigger than the one inside it
+	particles: boolean; // sparks drifting out from the ring, more with the bass
 	pulse: number; // 0..1 how much the cover beats with the bass
 	minFreq: number;
 	maxFreq: number;
@@ -76,6 +78,8 @@ export const defaultViz = (): VizSettings => ({
 	decay: 220,
 	smoothing: 0.35,
 	peaks: false,
+	layers: 7,
+	particles: false,
 	pulse: 0.3,
 	minFreq: 40,
 	maxFreq: 10000,
@@ -311,10 +315,11 @@ export const VIZ_RANGES: Partial<Record<keyof VizSettings, [min: number, max: nu
 	maxFreq: [1000, 11000, 100],
 	tilt: [0, 6, 0.5],
 	colorCount: [2, MAX_COLOR_POINTS, 1],
+	layers: [2, 10, 1],
 	syncOffset: [-300, 300, 10],
 };
 const CHOICES: Partial<Record<keyof VizSettings, readonly unknown[]>> = {
-	style: ["bars", "wave", "dots"],
+	style: ["bars", "wave", "dots", "layers"],
 	shape: ["square", "circle"],
 	placement: ["outside", "inside", "both"],
 	colorMode: ["artwork", "solid", "gradient", "spectrum"],
@@ -358,5 +363,9 @@ export const VIZ_PRESETS: Record<string, { label: string; viz: Partial<VizSettin
 	aura: { label: "Aura", viz: { style: "wave", length: 70, glow: 30, opacity: 0.9, smoothing: 0.7, pulse: 0.4, decay: 400 } },
 	club: { label: "Club", viz: { bars: 64, length: 110, pulse: 0.8, peaks: true, decay: 300, sensitivity: 18, glow: 14 } },
 	pearls: { label: "Pearls", viz: { style: "dots", bars: 72, length: 40, glow: 10, width: 0.7 } },
+	rainbowLayers: {
+		label: "Rainbow layers",
+		viz: { style: "layers", shape: "circle", mirror: true, rotation: 180, colorMode: "spectrum", layers: 7, bars: 96, length: 130, gap: 0, glow: 12, smoothing: 0.6, decay: 260, particles: true, pulse: 0.35, sensitivity: 14 },
+	},
 	inner: { label: "Inner glow", viz: { placement: "inside", bars: 128, length: 60, opacity: 0.6, glow: 16, width: 0.4 } },
 };

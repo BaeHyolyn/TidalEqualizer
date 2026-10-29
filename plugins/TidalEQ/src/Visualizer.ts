@@ -104,6 +104,39 @@ const lum = (c: string) => {
 	return (n[0] ?? 0) * 0.3 + (n[1] ?? 0) * 0.59 + (n[2] ?? 0) * 0.11;
 };
 
+const PARTICLE_LIFE = 1.6; // seconds
+const PARTICLE_RANGE = 90; // px past the ring they can travel
+
+/** How much bigger layer k is than the innermost one: outer layers reach further out. */
+const layerScale = (k: number) => 1 + k * 0.1;
+
+/** a → b at t (0..1), for #rrggbb colors. */
+const mixHex = (a: string, b: string, t: number) => {
+	const ch = (c: string, i: number) => parseInt(c.slice(i, i + 2), 16);
+	const m = (i: number) => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t);
+	return `rgb(${m(1)},${m(3)},${m(5)})`;
+};
+
+/** One color per layer, innermost first. */
+const layerColors = (v: VizSettings, pointColors: string[], art: string): string[] =>
+	Array.from({ length: v.layers }, (_, k) => {
+		const t = v.layers > 1 ? k / (v.layers - 1) : 0;
+		switch (v.colorMode) {
+			case "spectrum": {
+				// white inside, then yellow, through red and violet, to green outside
+				if (k === 0) return "hsl(0,0%,97%)";
+				const u = v.layers > 2 ? (k - 1) / (v.layers - 2) : 0;
+				return `hsl(${(50 - u * 290 + 360) % 360},95%,${62 - u * 8}%)`;
+			}
+			case "artwork":
+				return pointColors.length ? pointColors[Math.round(t * (pointColors.length - 1))] : art;
+			case "gradient":
+				return mixHex(v.color1, v.color2, t);
+			default:
+				return v.color1;
+		}
+	});
+
 export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	const canvas = document.createElement("canvas");
 	// Mounted inside the cover's box (see the loop), stacked above the image so "Inside" bars show over the cover
@@ -119,6 +152,12 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	let pixels: Uint8ClampedArray | null = null; // the current cover, for the color points
 	let pointColors: string[] = [];
 	let pointsKey = "";
+	// "layers" style: each layer follows the bars a little later than the one inside it
+	let layerState = new Float32Array(0);
+	// Sparks for the particles option: angle, distance from the ring, speed (px/s), size, age (s); a fixed pool, no allocations
+	const MAX_PARTICLES = 90;
+	const particles = new Float32Array(MAX_PARTICLES * 5);
+	let liveParticles = 0;
 	let pointsSeen: VizSettings["colorPoints"] | null = null; // the manual points last sampled (same array until edited)
 	// TIDAL's tab bar, player bar and side panel, so the drawing stays clear of them
 	let ui: { panel?: DOMRect; tabs?: DOMRect; player?: DOMRect } = {};
@@ -236,6 +275,15 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		}
 		smoothBars(state, target, shown, dt, v);
 		for (let b = 0; b < bands; b++) peaks[b] = Math.max(shown[b], peaks[b] - dt / 1500);
+		if (v.style === "layers") {
+			if (layerState.length !== v.layers * bands) layerState = new Float32Array(v.layers * bands);
+			for (let k = 0; k < v.layers; k++) {
+				const follow = 1 - Math.exp(-dt / (35 + k * 45)); // outer layers lag more
+				for (let b = 0; b < bands; b++) layerState[k * bands + b] += (shown[b] - layerState[k * bands + b]) * follow;
+			}
+		}
+		if (v.particles) updateParticles(dt, bands);
+		else liveParticles = 0;
 
 		draw(v, rect!, img!, bands, now);
 
@@ -252,7 +300,8 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 	const draw = (v: VizSettings, rect: DOMRect, img: HTMLElement, bands: number, now: number) => {
 		// Room around the cover for the longest bar and its glow; a circle also reaches past the cover's corners
 		const corner = v.shape === "circle" ? (Math.hypot(rect.width, rect.height) - Math.max(rect.width, rect.height)) / 2 : 0;
-		const margin = Math.max(0, v.gap) + v.length + v.glow * 2 + 8 + corner;
+		const reach = v.style === "layers" ? v.length * layerScale(v.layers - 1) + v.layers * 2 : v.length;
+		const margin = Math.max(0, v.gap) + reach + v.glow * 2 + 8 + corner + (v.particles ? PARTICLE_RANGE : 0);
 		const dpr = window.devicePixelRatio || 1;
 		const W = Math.ceil(rect.width + margin * 2);
 		const H = Math.ceil(rect.height + margin * 2);
@@ -371,28 +420,48 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		ctx.lineCap = v.roundCaps ? "round" : "butt";
 		ctx.lineJoin = "round";
 
-		ctx.beginPath();
-		if (v.style === "wave") {
+		// Smooth closed curve through the tips of a ring of values, via midpoints
+		const smoothRing = (value: (i: number) => number, scale: number, offset = 0) => {
 			const pts: [number, number][] = [];
 			for (let i = 0; i < n; i++) {
 				const [x, y, nx, ny] = at(i / n + turn);
-				const [, end] = span(2 + valueAt(i) * v.length);
+				const [, end] = span(2 + offset + value(i) * v.length * scale);
 				pts.push([x + nx * end, y + ny * end]);
 			}
-			// Smooth closed curve through the tips, via midpoints
 			const mid = (a: [number, number], b: [number, number]) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as const;
 			const start = mid(pts[n - 1], pts[0]);
-			const wave = new Path2D();
-			wave.moveTo(start[0], start[1]);
+			const path = new Path2D();
+			path.moveTo(start[0], start[1]);
 			for (let i = 0; i < n; i++) {
 				const m = mid(pts[i], pts[(i + 1) % n]);
-				wave.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]);
+				path.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]);
 			}
-			wave.closePath();
-			// Fill only the band between the outline and the wave, never over the cover itself
-			const band = new Path2D(wave);
+			path.closePath();
+			return path;
+		};
+		// The ring's base outline, to fill only around the cover and never over it (even-odd)
+		const withOutline = (path: Path2D) => {
+			const band = new Path2D(path);
 			if (v.shape === "circle") band.moveTo(cx + radius, cy), band.arc(cx, cy, radius, 0, 2 * Math.PI);
 			else band.rect(cx - hw, cy - hh, hw * 2, hh * 2);
+			return band;
+		};
+
+		ctx.beginPath();
+		if (v.style === "layers") {
+			// Outermost first, each layer filled in its own color; only the outermost glows (a glow per layer is costly)
+			const colors = layerColors(v, pointColors, art);
+			for (let k = v.layers - 1; k >= 0; k--) {
+				const off = k * bands;
+				ctx.shadowBlur = k === v.layers - 1 ? v.glow : 0;
+				ctx.shadowColor = colors[k];
+				ctx.fillStyle = colors[k];
+				// Squared-ish so quiet parts stay low and the peaks stand out; a 2 px step keeps a thin rim of every color
+				ctx.fill(withOutline(smoothRing((i) => layerState[off + bandOf(i)] ** 1.8, layerScale(k), k * 2)), "evenodd");
+			}
+		} else if (v.style === "wave") {
+			const wave = smoothRing(valueAt, 1);
+			const band = withOutline(wave);
 			ctx.lineWidth = Math.max(1, thick * 0.5);
 			ctx.globalAlpha = v.opacity * 0.35;
 			ctx.fill(band, "evenodd");
@@ -419,7 +488,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			ctx.stroke();
 		}
 
-		if (v.peaks && v.style !== "wave") {
+		if (v.peaks && (v.style === "bars" || v.style === "dots")) {
 			ctx.beginPath();
 			ctx.shadowBlur = 0;
 			for (let i = 0; i < n; i++) {
@@ -431,7 +500,52 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			ctx.lineWidth = thick;
 			ctx.stroke();
 		}
+
+		if (v.particles && liveParticles) {
+			ctx.shadowBlur = 0;
+			ctx.fillStyle = "#ffffff";
+			const base = v.shape === "circle" ? radius : Math.max(hw, hh);
+			for (let p = 0; p < liveParticles; p++) {
+				const o = p * 5;
+				const r = base + particles[o + 1];
+				ctx.globalAlpha = v.opacity * Math.max(0, 1 - particles[o + 4] / PARTICLE_LIFE);
+				ctx.beginPath();
+				ctx.arc(cx + Math.cos(particles[o]) * r, cy + Math.sin(particles[o]) * r, particles[o + 3], 0, 2 * Math.PI);
+				ctx.fill();
+			}
+		}
 		ctx.restore();
+	};
+
+	// Sparks: spawned around the ring, more on bass hits; they drift outward and fade
+	const updateParticles = (dt: number, bands: number) => {
+		const sec = dt / 1000;
+		let bass = 0;
+		const nb = Math.max(1, Math.round(bands * 0.15));
+		for (let b = 0; b < nb; b++) bass += shown[b];
+		bass /= nb;
+		// Age and move; a dead one is replaced by the last live one, so the pool stays packed
+		for (let p = 0; p < liveParticles; p++) {
+			const o = p * 5;
+			particles[o + 4] += sec;
+			particles[o + 1] += particles[o + 2] * sec * (1 + bass * 2);
+			if (particles[o + 4] >= PARTICLE_LIFE || particles[o + 1] > PARTICLE_RANGE) {
+				liveParticles--;
+				particles.copyWithin(o, liveParticles * 5, liveParticles * 5 + 5);
+				p--;
+			}
+		}
+		let spawn = (2 + bass * bass * 60) * sec;
+		while (spawn > 0 && liveParticles < MAX_PARTICLES) {
+			if (spawn < 1 && Math.random() > spawn) break;
+			const o = liveParticles++ * 5;
+			particles[o] = Math.random() * 2 * Math.PI;
+			particles[o + 1] = Math.random() * 10;
+			particles[o + 2] = 20 + Math.random() * 40;
+			particles[o + 3] = 0.8 + Math.random() * 1.8;
+			particles[o + 4] = 0;
+			spawn--;
+		}
 	};
 
 	frame = requestAnimationFrame(loop);
