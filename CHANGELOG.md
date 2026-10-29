@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Visualizer setting changes sometimes weren't saved: the database refused values still tied to the store (#15).
+- The Visualizer tab now says when a music video is playing, since the visualizer only works with audio tracks.
+
 ## 1.4.0
 
 ### Visualizer

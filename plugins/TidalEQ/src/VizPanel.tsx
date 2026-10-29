@@ -1,4 +1,4 @@
-import { PlayState } from "@luna/lib";
+import { MediaItem, PlayState } from "@luna/lib";
 import React from "react";
 
 import { heading, Pill, text, type Looks } from "./NowPlayingTab";
@@ -18,12 +18,14 @@ const useViz = () => {
 	const update: Update = (next) => {
 		const merged = { ...vizSettings(), ...next }; // from storage, so quick successive changes all stick
 		setViz(merged);
-		settings.viz = merged;
+		// A plain copy: values read from storage are live proxies, which the database refuses to save
+		settings.viz = plain(merged);
 	};
 	return [viz, update] as const;
 };
 
 const DEFAULTS = defaultViz();
+const plain = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const changed = (viz: VizSettings, keys: Key[]) => keys.filter((k) => !same(viz[k], DEFAULTS[k]));
 const defaultsOf = (keys: Key[]) => Object.fromEntries(keys.map((k) => [k, DEFAULTS[k]])) as Partial<VizSettings>;
@@ -249,7 +251,7 @@ const Presets = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; updat
 	};
 	const store = (list: typeof saved) => {
 		setSaved(list);
-		settings.vizPresets = list;
+		settings.vizPresets = plain(list);
 	};
 	const save = () => {
 		const name = naming?.trim();
@@ -342,13 +344,18 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 	const [confirmReset, setConfirmReset] = React.useState(false);
 	const [playing, setPlaying] = React.useState(PlayState.playing);
 	const [eqOn, setEqOn] = React.useState(settings.enabled);
+	const [isVideo, setIsVideo] = React.useState(false);
 	const onOff: [boolean, string][] = [[true, "On"], [false, "Off"]];
 	const p = { viz, update };
 
 	// Animate a preview while this tab is open and the music is paused
 	React.useEffect(() => {
 		setPreview(true);
-		const t = setInterval(() => (setPlaying(PlayState.playing), setEqOn(settings.enabled)), 500);
+		const t = setInterval(() => {
+			setPlaying(PlayState.playing);
+			setEqOn(settings.enabled);
+			MediaItem.fromPlaybackContext().then((m) => setIsVideo(m?.contentType === "video")).catch(() => {});
+		}, 500);
 		return () => {
 			setPreview(false);
 			clearInterval(t);
@@ -362,7 +369,9 @@ export const VizPanel = ({ looks }: { looks: Looks }) => {
 			<div style={{ margin: "auto 0", paddingBottom: 48 }}>
 				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
 					<p style={text}>
-						{!playing
+						{isVideo
+							? "This is a music video: the visualizer only works with audio tracks, so it stays still."
+							: !playing
 							? "Music paused: showing a preview so you can still see your changes."
 							: eqOn
 								? "Spectrum around the cover, after your equalizer."
