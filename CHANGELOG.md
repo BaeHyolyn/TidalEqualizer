@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
 
 ### Visualizer
 - New **Layers** style: stacked waves, each one a step behind and bigger than the one inside it, in rainbow, cover, gradient or solid colors.
