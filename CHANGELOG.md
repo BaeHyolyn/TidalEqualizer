@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+- The visualizer only downloads and decodes a track once its cover is on screen, so tracks nobody looks at cost nothing.
+- Long tracks (DJ mixes, hours long) no longer pile up in memory: past 400 MB the download is passed straight through instead of kept.
+- Keyboard control for equalizer bands and color points.
+- Screenshots in the README.
+
 ## 1.3.1
 
 ### Fixed
