@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> This plugin moved to **[BaeHyolyn/luna-plugins](https://github.com/BaeHyolyn/luna-plugins)**. New releases are published there. Install from:
+> `https://github.com/BaeHyolyn/luna-plugins/releases/latest/download/store.json`
+
 <h1 align="center">TidalEQ</h1>
 
 <p align="center">A real equalizer inside TIDAL.</p>
