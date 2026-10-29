@@ -107,8 +107,11 @@ const lum = (c: string) => {
 const PARTICLE_LIFE = 1.6; // seconds
 const PARTICLE_RANGE = 90; // px past the ring they can travel
 
+/** How many times the bands go round the ring: once, twice (mirror) or four times (four-way). */
+const symmetry = (v: VizSettings) => (!v.mirror ? 1 : v.fourWay ? 4 : 2);
+
 /** How much bigger layer k is than the innermost one: outer layers reach further out. */
-const layerScale = (k: number) => 1 + k * 0.1;
+const layerScale = (k: number) => 1 + k * 0.05;
 
 /** a → b at t (0..1), for #rrggbb colors. */
 const mixHex = (a: string, b: string, t: number) => {
@@ -264,7 +267,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		if (now - lastPoll > 100) (lastPoll = now), void pollTime();
 		if (now - lastPull > 200) (lastPull = now), void pullPcm();
 
-		const bands = Math.max(4, Math.round(v.mirror ? v.bars / 2 : v.bars));
+		const bands = Math.max(4, Math.round(v.bars / symmetry(v)));
 		rebuild(v, bands);
 		refreshEq(now);
 
@@ -310,7 +313,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const circular = v.shape === "circle" || v.roundCover;
 		const coverRadius = v.roundCover ? Math.max(rect.width, rect.height) / 2 : Math.hypot(rect.width, rect.height) / 2;
 		const corner = circular ? coverRadius - Math.max(rect.width, rect.height) / 2 : 0;
-		const reach = v.style === "layers" ? v.length * layerScale(v.layers - 1) + v.layers * 2 : v.length;
+		const reach = v.style === "layers" ? v.length * layerScale(v.layers - 1) : v.length;
 		const margin = Math.max(0, v.gap) + reach + v.glow * 2 + 8 + corner + (v.particles ? PARTICLE_RANGE : 0);
 		const dpr = window.devicePixelRatio || 1;
 		const W = Math.ceil(rect.width + margin * 2);
@@ -352,7 +355,7 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 		const hw = rect.width / 2 + v.gap;
 		const hh = rect.height / 2 + v.gap;
 		const radius = coverRadius + v.gap;
-		const n = v.mirror ? bands * 2 : bands;
+		const n = bands * symmetry(v);
 		const perimeter = circular ? 2 * Math.PI * radius : 4 * (hw + hh);
 		const slot = perimeter / n;
 		// Bar thickness follows the slot, capped so a low bar count doesn't turn into blobs
@@ -382,7 +385,13 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 			return [cx, cy + hh, 0, 1];
 		};
 		// Bar i of the ring → its band (mirrored: both halves count up from the bottom)
-		const bandOf = (i: number) => (v.mirror ? (i < bands ? i : n - 1 - i) : i);
+		// Bar i of the ring → its band. Mirrored, the bands count up and back down once per half (or per quarter four-way),
+		// so the lows meet at the bottom (and top) and both sides match.
+		const bandOf = (i: number) => {
+			if (!v.mirror) return i;
+			const j = i % (bands * 2);
+			return j < bands ? j : bands * 2 - 1 - j;
+		};
 		const valueAt = (i: number) => shown[bandOf(i)];
 		const peakAt = (i: number) => peaks[bandOf(i)];
 		// Where a bar of `len` px starts and ends, depending on placement
@@ -466,8 +475,10 @@ export const startVisualizer = (unloads: Set<LunaUnload>) => {
 				ctx.shadowBlur = k === v.layers - 1 ? v.glow : 0;
 				ctx.shadowColor = colors[k];
 				ctx.fillStyle = colors[k];
-				// Squared-ish so quiet parts stay low and the peaks stand out; a 2 px step keeps a thin rim of every color
-				ctx.fill(withOutline(smoothRing((i) => layerState[off + bandOf(i)] ** 1.8, layerScale(k), k * 2)), "evenodd");
+				// Steep curve so quiet parts stay low and the peaks stand out; a 2 px step keeps a thin rim of every color
+				// Steep curve so quiet parts stay low and the peaks stand out. At rest only the thin white ring shows; the
+				// colors peek out around it as the outer layers lag behind the music.
+				ctx.fill(withOutline(smoothRing((i) => layerState[off + bandOf(i)] ** 2.4, layerScale(k))), "evenodd");
 			}
 		} else if (v.style === "wave") {
 			const wave = smoothRing(valueAt, 1);

@@ -14,6 +14,7 @@ export type VizSettings = {
 	shape: VizShape;
 	placement: VizPlacement;
 	mirror: boolean; // low frequencies meet at the bottom, symmetric left/right
+	fourWay: boolean; // with mirror: symmetric both ways, lows at the bottom and top (rotate 90° for side "wings")
 	bars: number;
 	gap: number; // px between the cover and the bars
 	length: number; // px, longest bar
@@ -52,6 +53,7 @@ export const defaultViz = (): VizSettings => ({
 	shape: "square",
 	placement: "outside",
 	mirror: true,
+	fourWay: false,
 	bars: 96,
 	gap: 10,
 	length: 48,
@@ -367,7 +369,13 @@ export const VIZ_PRESETS: Record<string, { label: string; viz: Partial<VizSettin
 	pearls: { label: "Pearls", viz: { style: "dots", bars: 72, length: 40, glow: 10, width: 0.7 } },
 	rainbowLayers: {
 		label: "Rainbow layers",
-		viz: { style: "layers", shape: "circle", roundCover: true, mirror: true, rotation: 180, colorMode: "spectrum", layers: 7, bars: 96, length: 130, gap: 0, glow: 12, smoothing: 0.6, decay: 260, particles: true, pulse: 0.35, sensitivity: 14 },
+		// Bass opens "wings" left and right; at rest only a thin white ring; colors are thin lagging rims
+		viz: {
+			style: "layers", shape: "circle", roundCover: true, mirror: true, fourWay: true, rotation: 90, colorMode: "spectrum", layers: 7,
+			bars: 64, length: 190, gap: 0, glow: 12, smoothing: 0.55, attack: 30, decay: 260, particles: true, pulse: 0.5,
+			sensitivity: 8, minFreq: 35, maxFreq: 900, tilt: 0,
+		},
 	},
+
 	inner: { label: "Inner glow", viz: { placement: "inside", bars: 128, length: 60, opacity: 0.6, glow: 16, width: 0.4 } },
 };
