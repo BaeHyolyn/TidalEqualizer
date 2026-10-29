@@ -185,6 +185,23 @@ const ColorPoints = ({ looks, viz, update }: { looks: Looks; viz: VizSettings; u
 								e.stopPropagation();
 								if (points.length > 1) manual(points.filter((_, j) => j !== i));
 							}}
+							// Keyboard: arrows move the dot (Shift for bigger steps), Delete removes it
+							tabIndex={0}
+							role="button"
+							aria-label={`Color point ${i + 1}: arrows move it, Delete removes it`}
+							onKeyDown={(e) => {
+								const step = e.shiftKey ? 0.1 : 0.02;
+								const move: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+								const clamp = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 1000) / 1000;
+								if (move[e.key]) {
+									e.preventDefault();
+									const [dx, dy] = move[e.key];
+									manual(points.map((p, j) => (j === i ? [clamp(p[0] + dx), clamp(p[1] + dy)] : p)));
+								} else if ((e.key === "Delete" || e.key === "Backspace") && points.length > 1) {
+									e.preventDefault();
+									manual(points.filter((_, j) => j !== i));
+								}
+							}}
 							style={{
 								position: "absolute", left: `${x * 100}%`, top: `${y * 100}%`, width: dot, height: dot, margin: -dot / 2, borderRadius: dot,
 								background: colors[i], border: "2px solid #fff", boxShadow: "0 0 0 1px rgba(0,0,0,0.5)", cursor: "grab", boxSizing: "border-box",

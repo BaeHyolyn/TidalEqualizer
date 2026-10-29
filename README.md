@@ -4,6 +4,12 @@
 
 TidalEQ is an equalizer plugin for [TidaLuna](https://github.com/Inrixia/TidaLuna). It adds **Equalizer** and **Visualizer** tabs next to Similar tracks, Credits and Lyrics in TIDAL's now-playing view, so you can shape the sound and see it without leaving the player.
 
+<p align="center">
+  <img src="docs/visualizer.png" width="49%" alt="Visualizer tab: a rainbow ring of bars around the now-playing cover, with its settings" />
+  <img src="docs/equalizer.png" width="49%" alt="Equalizer tab: the frequency response graph with draggable bands and presets" />
+</p>
+<p align="center"><sub>Cover art hidden in the screenshots.</sub></p>
+
 ## Install
 
 1. Install [TidaLuna](https://github.com/Inrixia/TidaLuna).
@@ -35,6 +41,7 @@ Turn off TIDAL's exclusive mode: TidalEQ plays the audio itself, and exclusive m
   - sensitivity, frequency range, treble lift, sync offset and frame rate.
 - **Presets** for the visualizer, plus your own saved looks, and **Copy / Paste settings** to share them.
 - Every setting can go back to its default on its own (↺ or double-click), per section, or all at once.
+- **Keyboard:** Tab to an equalizer band, then the arrows move it (←→ frequency, ↑↓ gain), PageUp/PageDown change its width and Delete resets it; Shift makes bigger steps. Color points move with the arrows and Delete removes them.
 
 ## How it works
 

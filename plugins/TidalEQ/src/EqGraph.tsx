@@ -1,6 +1,6 @@
 import React from "react";
 
-import { responseDb, type Band, type Macros } from "./eq";
+import { keyStep, responseDb, type Band, type Macros } from "./eq";
 
 // Drawing space in CSS pixels; the width follows the panel so text keeps its size in small windows
 const L = 52; // left margin for dB labels
@@ -42,6 +42,7 @@ const y = (db: number) => TOP + ((DB - db) / (2 * DB)) * PH;
 const dbAt = (py: number) => DB - ((Math.min(Math.max(py, TOP), TOP + PH) - TOP) / PH) * 2 * DB;
 
 const noGain = (b: Band) => b.type === "highpass" || b.type === "lowpass";
+
 
 type Props = {
 	bands: Band[];
@@ -191,6 +192,19 @@ export const EqGraph = ({ bands, macros, selected, onSelect, onBand }: Props) =>
 								onSelect(i);
 							}}
 							onDoubleClick={() => onBand(i, { ...b, gain: 0 })}
+							// Keyboard: Tab between bands, arrows move one, PageUp/PageDown change its width, Delete resets its gain
+							tabIndex={0}
+							role="slider"
+							aria-label={`Band ${i + 1}`}
+							aria-valuetext={`${Math.round(b.freq)} hertz, ${noGain(b) ? b.type : `${b.gain} decibels`}, Q ${b.q}`}
+							onFocus={() => onSelect(i)}
+							onKeyDown={(e) => {
+								const next = keyStep(b, e.key, e.shiftKey);
+								if (!next) return;
+								e.preventDefault();
+								onBand(i, next);
+							}}
+							style={{ outline: "none" }}
 						>
 							<title>{`${Math.round(b.freq)} Hz · ${noGain(b) ? b.type : `${b.gain > 0 ? "+" : ""}${b.gain} dB`} · Q ${b.q}`}</title>
 						</circle>

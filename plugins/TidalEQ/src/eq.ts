@@ -159,3 +159,21 @@ export const buildChain = (s: EqSettings): string => {
 	if (s.limiter) filters.push("alimiter=limit=0.97:level=0");
 	return filters.length ? `lavfi=[${filters.join(",")}]` : "";
 };
+
+/** A band after one key press, or null for keys that don't move it. Shift makes bigger steps. */
+export const keyStep = (b: Band, key: string, big: boolean): Band | null => {
+	const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+	const freqStep = big ? 1.25 : 1.05; // multiplicative: the axis is logarithmic
+	const gainStep = big ? 2 : 0.5;
+	const qStep = big ? 1.5 : 1.1;
+	switch (key) {
+		case "ArrowRight": return { ...b, freq: Math.round(clamp(b.freq * freqStep, 20, 20000)) };
+		case "ArrowLeft": return { ...b, freq: Math.round(clamp(b.freq / freqStep, 20, 20000)) };
+		case "ArrowUp": return (b.type === "highpass" || b.type === "lowpass") ? null : { ...b, gain: clamp(Math.round((b.gain + gainStep) * 2) / 2, -12, 12) };
+		case "ArrowDown": return (b.type === "highpass" || b.type === "lowpass") ? null : { ...b, gain: clamp(Math.round((b.gain - gainStep) * 2) / 2, -12, 12) };
+		case "PageUp": return { ...b, q: Math.round(clamp(b.q * qStep, 0.1, 10) * 100) / 100 };
+		case "PageDown": return { ...b, q: Math.round(clamp(b.q / qStep, 0.1, 10) * 100) / 100 };
+		case "Delete": case "Backspace": case "0": return { ...b, gain: 0 };
+		default: return null;
+	}
+};

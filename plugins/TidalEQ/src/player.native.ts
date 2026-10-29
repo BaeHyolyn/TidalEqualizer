@@ -17,8 +17,20 @@ let port = 0;
 let nextRequest = 1;
 const pending = new Map<number, (reply: { error: string; data?: unknown }) => void>();
 // One track per load; the random token keeps other local programs from reading it.
-// The player and the visualizer's decoder share one download: every request replays what arrived so far, then follows.
-type Track = { info: PlaybackInfo; source?: Readable; chunks: Buffer[]; done: boolean; failed: boolean; started: boolean; wake: Set<() => void> };
+// The player and the visualizer's decoder share one download: a request replays what arrived so far, then follows it live.
+type Track = {
+	info: PlaybackInfo;
+	source?: Readable;
+	chunks: Buffer[]; // kept for requests that come later (mpv re-opening, the decoder starting after the player)
+	received: number;
+	retained: boolean; // false once over RETAIN_LIMIT: later requests then download on their own
+	done: boolean;
+	failed: boolean;
+	started: boolean;
+	listeners: Set<(chunk: Buffer | null) => void>; // null = the download ended
+};
+// Above this, stop keeping the download in memory (a 2-hour hi-res mix would otherwise hold gigabytes)
+const RETAIN_LIMIT = 400 * 1024 * 1024;
 const streams = new Map<string, Track>();
 const clearStreams = () => {
 	for (const t of streams.values()) t.source?.destroy();
@@ -33,36 +45,54 @@ const ensureServer = async () => {
 	if (!server) await startServer();
 };
 
+const startDownload = (track: Track) => {
+	track.started = true;
+	const finish = (failed: boolean) => {
+		track.done = true;
+		track.failed = failed;
+		track.listeners.forEach((l) => l(null));
+		track.listeners.clear();
+	};
+	fetchMediaItemStream(track.info)
+		.then((source) => {
+			track.source = source;
+			source.on("data", (c: Buffer) => {
+				track.received += c.length;
+				if (track.retained) track.chunks.push(c);
+				if (track.retained && track.received > RETAIN_LIMIT) {
+					track.retained = false;
+					track.chunks = []; // the listeners already have it all
+				}
+				track.listeners.forEach((l) => l(c));
+			});
+			source.on("end", () => finish(track.received === 0));
+			source.on("error", () => finish(true));
+		})
+		.catch(() => finish(true));
+};
+
 const startServer = () =>
 	new Promise<void>((resolve, reject) => {
 		server = createServer(async (req, res) => {
 			const track = streams.get((req.url ?? "").replace(/^\/track\//, ""));
 			if (!track) return void res.writeHead(404).end();
-			const notify = () => track.wake.forEach((fn) => fn());
-			if (!track.started) {
-				track.started = true;
-				// shortcut: keeps the whole track in memory (up to ~150 MB for hi-res) until the next track; fine for one track at a time
-				fetchMediaItemStream(track.info)
-					.then((source) => {
-						track.source = source;
-						source.on("data", (c: Buffer) => (track.chunks.push(c), notify()));
-						source.on("end", () => ((track.done = true), (track.failed = track.chunks.length === 0), notify()));
-						source.on("error", () => ((track.done = true), (track.failed = true), notify()));
-					})
-					.catch(() => ((track.done = true), (track.failed = true), notify()));
-			}
 			res.writeHead(200, { "Content-Type": "application/octet-stream" });
-			let sent = 0;
-			const pump = () => {
-				while (sent < track.chunks.length) res.write(track.chunks[sent++]);
-				if (track.done) {
-					track.wake.delete(pump);
-					res.end();
-				}
-			};
-			track.wake.add(pump);
-			res.on("close", () => track.wake.delete(pump));
-			pump();
+
+			// The shared copy was dropped (very long track): this request downloads on its own
+			if (!track.retained) {
+				fetchMediaItemStream(track.info)
+					.then((source) => (source.pipe(res), res.on("close", () => source.destroy())))
+					.catch(() => res.end());
+				return;
+			}
+
+			if (!track.started) startDownload(track);
+			// What arrived so far, then the rest as it comes (same tick, so nothing is missed in between)
+			for (const c of track.chunks) res.write(c);
+			if (track.done) return void res.end();
+			const listener = (chunk: Buffer | null) => (chunk ? res.write(chunk) : res.end());
+			track.listeners.add(listener);
+			res.on("close", () => track.listeners.delete(listener));
 		});
 		server.on("error", reject);
 		server.listen(0, "127.0.0.1", () => {
@@ -178,7 +208,7 @@ export const prepareTrack = async (info: PlaybackInfo) => {
 	await ensureServer();
 	const token = randomBytes(16).toString("hex");
 	clearStreams();
-	streams.set(token, { info, chunks: [], done: false, failed: false, started: false, wake: new Set() });
+	streams.set(token, { info, chunks: [], received: 0, retained: true, done: false, failed: false, started: false, listeners: new Set() });
 	currentUrl = `http://127.0.0.1:${port}/track/${token}`;
 	stopDecoder();
 	return currentUrl;

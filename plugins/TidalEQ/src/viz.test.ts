@@ -1,5 +1,6 @@
 import assert from "assert";
 
+import { keyStep } from "./eq";
 import { analyze, autoPoints, bandEdges, bandLevels, defaultViz, FFT_SIZE, PCM_RATE, sampleColors, sanitizeViz, smoothBars } from "./viz";
 
 // A full-scale 1 kHz sine peaks at ~0 dB in the 1 kHz bin and is far lower elsewhere
@@ -61,5 +62,15 @@ assert.deepStrictEqual(pasted.colorPoints, [[0.5, 1]]);
 assert.strictEqual(pasted.opacity, 0.5);
 assert(!("evil" in pasted), "unknown keys are dropped");
 assert.deepStrictEqual(sanitizeViz("nonsense"), defaultViz());
+
+// Keyboard on an EQ band: arrows move it within limits, Shift moves more, other keys do nothing
+const band = { enabled: true, type: "peaking" as const, freq: 1000, gain: 11.5, q: 1 };
+assert.strictEqual(keyStep(band, "ArrowRight", false)!.freq, 1050);
+assert.strictEqual(keyStep(band, "ArrowRight", true)!.freq, 1250);
+assert.strictEqual(keyStep(band, "ArrowUp", true)!.gain, 12, "gain stops at +12");
+assert.strictEqual(keyStep({ ...band, freq: 20 }, "ArrowLeft", false)!.freq, 20, "frequency stops at 20 Hz");
+assert.strictEqual(keyStep(band, "Delete", false)!.gain, 0);
+assert.strictEqual(keyStep({ ...band, type: "highpass" }, "ArrowUp", false), null, "high-pass has no gain");
+assert.strictEqual(keyStep(band, "a", false), null);
 
 console.log("viz: all tests passed");

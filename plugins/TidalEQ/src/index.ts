@@ -8,7 +8,7 @@ import {
 	trackFailed,
 } from "./player.native";
 import { setEqChangeHandler, settings, vizSettings } from "./Settings";
-import { resetPcm, setPositionSource, startVisualizer } from "./Visualizer";
+import { COVER, resetPcm, setPositionSource, startVisualizer } from "./Visualizer";
 import { VizPanel } from "./VizPanel";
 import { PCM_RATE } from "./viz";
 
@@ -91,8 +91,10 @@ const sync = async () => {
 		if (performance.now() - loadedAt > SETTLE_S * 1000 && (await trackFailed())) return letTidalPlay(media.id, "Couldn't load this track for the equalizer");
 
 		// The visualizer decodes the track separately; (re)start it when turned on or after a track change
+		// Only once the cover is on screen: no decoding for tracks nobody looks at. Once started it keeps going, so
+		// closing and reopening the now-playing view doesn't decode the same track again.
 		const wantAnalysis = vizSettings().enabled;
-		if (wantAnalysis && analyzedId !== loadedId) {
+		if (wantAnalysis && analyzedId !== loadedId && coverShown()) {
 			await startAnalysis(PCM_RATE, settings.mpvPath);
 			resetPcm(true);
 			analyzedId = loadedId;
@@ -156,6 +158,7 @@ const letTidalPlay = async (id: MediaItem["id"], why: string) => {
  * and decoded for it, and the bars follow TIDAL's position.
  */
 let vizOnlyId: MediaItem["id"] | null = null;
+const coverShown = () => document.querySelector(COVER) !== null;
 const syncVisualizerOnly = async () => {
 	if (running || busy) return;
 	busy = true;
@@ -169,7 +172,8 @@ const syncVisualizerOnly = async () => {
 			}
 			return;
 		}
-		if (media.id === vizOnlyId) return;
+		// The download is only for the visualizer here, so wait until its cover is actually on screen
+		if (media.id === vizOnlyId || !coverShown()) return;
 		vizOnlyId = media.id;
 		const info = await media.playbackInfo(PlayState.playbackContext?.actualAudioQuality).catch(() => undefined);
 		if (!info || running) return;
