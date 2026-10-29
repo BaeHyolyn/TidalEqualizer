@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.1
 
 ### Fixed
 - Visualizer setting changes sometimes weren't saved: the database refused values still tied to the store (#15).
